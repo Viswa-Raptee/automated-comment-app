@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check, CheckCheck, Trash2, AlertTriangle, HelpCircle, UserPlus } from 'lucide-react';
+import { Bell, Check, CheckCheck, Trash2, AlertTriangle, HelpCircle, UserPlus, Filter } from 'lucide-react';
 import api from '../api/api';
 
 const NotificationDropdown = () => {
@@ -8,6 +8,7 @@ const NotificationDropdown = () => {
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [filter, setFilter] = useState('all'); // 'all', 'assignment', 'comment'
     const menuRef = useRef(null);
     const navigate = useNavigate();
 
@@ -42,6 +43,14 @@ const NotificationDropdown = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // Filter notifications
+    const filteredNotifications = notifications.filter(n => {
+        if (filter === 'all') return true;
+        if (filter === 'assignment') return n.type === 'assignment';
+        if (filter === 'comment') return n.type === 'complaint' || n.type === 'question';
+        return true;
+    });
 
     const handleNotificationClick = async (notif) => {
         // Mark as read
@@ -144,15 +153,48 @@ const NotificationDropdown = () => {
                         </div>
                     </div>
 
+                    {/* Filter Tabs */}
+                    <div className="px-4 py-2 border-b border-gray-200 flex gap-2">
+                        <button
+                            onClick={() => setFilter('all')}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filter === 'all'
+                                    ? 'bg-indigo-100 text-indigo-700'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                        >
+                            All
+                        </button>
+                        <button
+                            onClick={() => setFilter('assignment')}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'assignment'
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                        >
+                            <UserPlus size={12} />
+                            Assignments
+                        </button>
+                        <button
+                            onClick={() => setFilter('comment')}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'comment'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                        >
+                            <AlertTriangle size={12} />
+                            Comments
+                        </button>
+                    </div>
+
                     {/* Notifications List */}
                     <div className="max-h-96 overflow-y-auto">
-                        {notifications.length === 0 ? (
+                        {filteredNotifications.length === 0 ? (
                             <div className="py-12 text-center text-gray-400">
                                 <Bell size={32} className="mx-auto mb-2 opacity-30" />
                                 <p className="text-sm">No notifications</p>
                             </div>
                         ) : (
-                            notifications.map(notif => (
+                            filteredNotifications.map(notif => (
                                 <button
                                     key={notif.id}
                                     onClick={() => handleNotificationClick(notif)}

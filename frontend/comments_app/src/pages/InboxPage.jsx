@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { useAccounts } from '../context/AccountContext';
 import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import {
-  ChevronLeft, ChevronRight, RefreshCw, Youtube, Instagram, Bell,
+  ChevronLeft, ChevronRight, RefreshCw, Youtube, Instagram, ArrowLeft,
   Eye, Heart, MessageCircle, Share2, Clock, CheckCircle, XCircle
 } from 'lucide-react';
 import MessageCard from '../components/MessageCard';
@@ -140,6 +140,7 @@ const InsightsPanel = ({ post }) => {
 // ============ MAIN INBOX PAGE ============
 const InboxPage = () => {
   const { accountId } = useParams();
+  const [searchParams] = useSearchParams();
   const { accounts, fetchAccounts } = useAccounts();
   const [selectedAccount, setSelectedAccount] = useState(null);
 
@@ -174,13 +175,25 @@ const InboxPage = () => {
     try {
       const { data } = await api.get(`/posts-summary?accountId=${selectedAccount.id}`);
       setPosts(data);
-      setCurrentPostIndex(0);
+
+      // Set initial post index from URL param
+      const postIndexParam = searchParams.get('postIndex');
+      if (postIndexParam) {
+        const idx = parseInt(postIndexParam);
+        if (!isNaN(idx) && idx >= 0 && idx < data.length) {
+          setCurrentPostIndex(idx);
+        } else {
+          setCurrentPostIndex(0);
+        }
+      } else {
+        setCurrentPostIndex(0);
+      }
     } catch (e) {
       toast.error("Could not load posts");
     } finally {
       setLoading(false);
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, searchParams]);
 
   useEffect(() => {
     if (selectedAccount) {
@@ -329,6 +342,15 @@ const InboxPage = () => {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10">
         <div className="flex items-center gap-4">
+          {/* Back Button */}
+          <Link
+            to={`/account/${accountId}`}
+            className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+            title="Back to videos"
+          >
+            <ArrowLeft size={20} className="text-gray-600" />
+          </Link>
+
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md ${selectedAccount.platform === 'instagram'
             ? 'bg-gradient-to-br from-pink-500 to-purple-600'
             : 'bg-gradient-to-br from-red-500 to-red-600'

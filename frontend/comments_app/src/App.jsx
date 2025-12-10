@@ -5,6 +5,7 @@ import { AccountProvider } from './context/AccountContext';
 import ProtectedRoute from './ProtectedRoute';
 import Sidebar from './components/Sidebar';
 import DashboardPage from './pages/DashboardPage';
+import AccountPreviewPage from './pages/AccountPreviewPage';
 import InboxPage from './pages/InboxPage';
 import MyApprovalsPage from './pages/MyApprovalsPage';
 import AccountSettingsPage from './pages/AccountSettingsPage';
@@ -41,8 +42,11 @@ const App = () => {
                         {/* Dashboard - Landing Page */}
                         <Route path="/" element={<DashboardPage />} />
 
-                        {/* Account Inbox - View comments for specific account */}
-                        <Route path="/account/:accountId" element={<InboxPage />} />
+                        {/* Account Preview - Shows all videos */}
+                        <Route path="/account/:accountId" element={<AccountPreviewPage />} />
+
+                        {/* Account Inbox - View comments for specific post */}
+                        <Route path="/account/:accountId/inbox" element={<InboxPage />} />
 
                         {/* User Menu */}
                         <Route path="/my-comments" element={<MyApprovalsPage />} />
