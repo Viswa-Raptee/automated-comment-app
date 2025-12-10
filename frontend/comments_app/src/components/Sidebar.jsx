@@ -44,22 +44,6 @@ const Sidebar = () => {
         </Link>
       </div>
 
-      {/* User Info */}
-      <div className="px-4 py-4 border-b border-gray-800/50">
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-sm font-bold shadow-md">
-            {user?.username?.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-gray-100 truncate">{user?.username}</p>
-            <div className="flex items-center gap-1 text-[11px] text-gray-500 capitalize">
-              {user?.role === 'admin' && <Shield size={10} className="text-amber-400" />}
-              <span>{user?.role}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
         {/* Main Navigation */}
@@ -157,6 +141,22 @@ const Sidebar = () => {
           </div>
         )}
       </nav>
+
+      {/* User Info */}
+      <div className="px-4 py-4 border-b border-gray-800/50">
+        <div className="flex items-center gap-3 px-2">
+          <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-sm font-bold shadow-md">
+            {user?.username?.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-gray-100 truncate">{user?.username}</p>
+            <div className="flex items-center gap-1 text-[11px] text-gray-500 capitalize">
+              {user?.role === 'admin' && <Shield size={10} className="text-amber-400" />}
+              <span>{user?.role}</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Logout Button */}
       <div className="p-3 border-t border-gray-800/50">

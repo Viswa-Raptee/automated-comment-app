@@ -8,7 +8,7 @@ const fs = require('fs');
 require('dotenv').config();
 
 // --- IMPORTS ---
-const { sequelize, User, Account, Message } = require('./database');
+const { sequelize, User, Account, Post, Message, Notification } = require('./database');
 const { authenticate, isAdmin } = require('./middleware/auth');
 const { syncAccount, postInstagramReply, postYouTubeReply, loadClientSecrets } = require('./services/platforms');
 
@@ -176,24 +176,50 @@ app.post('/api/sync/:accountId', authenticate, async (req, res) => {
     }
 });
 
-// NEW: Get Summary of Posts (Groups messages by Post ID for the Sidebar)
+// NEW: Get Summary of Posts with Stats (for Media Carousel)
 app.get('/api/posts-summary', authenticate, async (req, res) => {
     const { accountId } = req.query;
     try {
-        // Group by postId and count pending messages
-        // Note: SQLite supports this basic grouping. For Postgres/MySQL, ensure strict grouping.
-        const posts = await Message.findAll({
-            where: { accountId, status: 'pending' },
-            attributes: [
-                'postId',
-                'postTitle',
-                'mediaUrl',
-                [sequelize.fn('COUNT', sequelize.col('id')), 'pendingCount']
-            ],
-            group: ['postId', 'postTitle', 'mediaUrl'],
-            order: [[sequelize.literal('pendingCount'), 'DESC']]
+        // Get all posts for this account with pending count
+        const posts = await Post.findAll({
+            where: { accountId },
+            order: [['lastSyncedAt', 'DESC']]
         });
-        res.json(posts);
+
+        // Get pending counts for each post
+        const postsWithCounts = await Promise.all(posts.map(async (post) => {
+            const pendingCount = await Message.count({
+                where: { accountId, postId: post.postId, status: 'pending' }
+            });
+            const approvedCount = await Message.count({
+                where: { accountId, postId: post.postId, status: 'posted' }
+            });
+            const rejectedCount = await Message.count({
+                where: { accountId, postId: post.postId, status: 'rejected' }
+            });
+
+            return {
+                id: post.id,
+                postId: post.postId,
+                postTitle: post.postTitle,
+                mediaUrl: post.mediaUrl,
+                embedUrl: post.embedUrl,
+                platform: post.platform,
+                viewCount: post.viewCount,
+                likeCount: post.likeCount,
+                commentCount: post.commentCount,
+                shareCount: post.shareCount,
+                publishedAt: post.publishedAt,
+                pendingCount,
+                approvedCount,
+                rejectedCount
+            };
+        }));
+
+        // Sort by pending count descending
+        postsWithCounts.sort((a, b) => b.pendingCount - a.pendingCount);
+
+        res.json(postsWithCounts);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -461,6 +487,167 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
         await user.save();
 
         res.json({ success: true, message: 'Password changed successfully' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ==========================================
+// 8. COMMENT ACTIONS
+// ==========================================
+
+// Toggle Important
+app.put('/api/messages/:id/important', authenticate, async (req, res) => {
+    try {
+        const msg = await Message.findByPk(req.params.id);
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        msg.isImportant = !msg.isImportant;
+        msg.markedImportantBy = msg.isImportant ? req.user.username : null;
+        await msg.save();
+
+        res.json({ success: true, isImportant: msg.isImportant, markedImportantBy: msg.markedImportantBy });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Assign to User
+app.put('/api/messages/:id/assign', authenticate, async (req, res) => {
+    const { assignedTo } = req.body;
+    try {
+        const msg = await Message.findByPk(req.params.id, { include: Account });
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        msg.assignedTo = assignedTo;
+        msg.assignedBy = req.user.username;
+        await msg.save();
+
+        // Create notification for assigned user
+        if (assignedTo) {
+            const targetUser = await User.findOne({ where: { username: assignedTo } });
+            if (targetUser) {
+                await Notification.create({
+                    userId: targetUser.id,
+                    type: 'assignment',
+                    messageId: msg.id,
+                    accountId: msg.accountId,
+                    postId: msg.postId,
+                    content: `You were assigned a comment by @${req.user.username}: "${msg.content.substring(0, 50)}..."`,
+                    fromUser: req.user.username
+                });
+            }
+        }
+
+        res.json({ success: true, assignedTo: msg.assignedTo, assignedBy: msg.assignedBy });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add Notes
+app.put('/api/messages/:id/notes', authenticate, async (req, res) => {
+    const { notes } = req.body;
+    try {
+        const msg = await Message.findByPk(req.params.id);
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        msg.notes = notes;
+        msg.notesAddedBy = req.user.username;
+        await msg.save();
+
+        res.json({ success: true, notes: msg.notes, notesAddedBy: msg.notesAddedBy });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get all users for assignment dropdown
+app.get('/api/users/list', authenticate, async (req, res) => {
+    try {
+        const users = await User.findAll({ attributes: ['id', 'username', 'role'] });
+        res.json(users);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ==========================================
+// 9. NOTIFICATIONS
+// ==========================================
+
+// Get user notifications
+app.get('/api/notifications', authenticate, async (req, res) => {
+    try {
+        const notifications = await Notification.findAll({
+            where: { userId: req.user.id },
+            order: [['createdAt', 'DESC']],
+            limit: 50,
+            include: [{ model: Message, attributes: ['id', 'content', 'authorName', 'postId', 'accountId'] }]
+        });
+        res.json(notifications);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get unread count
+app.get('/api/notifications/unread-count', authenticate, async (req, res) => {
+    try {
+        const count = await Notification.count({
+            where: { userId: req.user.id, isRead: false }
+        });
+        res.json({ count });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mark as read
+app.put('/api/notifications/:id/read', authenticate, async (req, res) => {
+    try {
+        await Notification.update(
+            { isRead: true },
+            { where: { id: req.params.id, userId: req.user.id } }
+        );
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mark all as read
+app.put('/api/notifications/read-all', authenticate, async (req, res) => {
+    try {
+        await Notification.update(
+            { isRead: true },
+            { where: { userId: req.user.id } }
+        );
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete notification
+app.delete('/api/notifications/:id', authenticate, async (req, res) => {
+    try {
+        await Notification.destroy({
+            where: { id: req.params.id, userId: req.user.id }
+        });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Clear all notifications
+app.delete('/api/notifications/clear-all', authenticate, async (req, res) => {
+    try {
+        await Notification.destroy({
+            where: { userId: req.user.id }
+        });
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

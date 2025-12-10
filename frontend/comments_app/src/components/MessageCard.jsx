@@ -1,72 +1,319 @@
-import { useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { RefreshCw, MoreVertical, Star, UserPlus, StickyNote, X } from 'lucide-react';
+import api from '../api/api';
+import { toast } from 'react-hot-toast';
 
-const MessageCard = ({ msg, onApprove }) => {
+// ============ ACTIONS MENU COMPONENT ============
+const ActionsMenu = ({ msg, onUpdate, onClose }) => {
+  const [mode, setMode] = useState(null); // null | 'assign' | 'notes'
+  const [users, setUsers] = useState([]);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [notesText, setNotesText] = useState(msg.notes || '');
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    // Fetch users for assign dropdown
+    const fetchUsers = async () => {
+      try {
+        const { data } = await api.get('/users/list');
+        setUsers(data);
+      } catch (e) {
+        console.error('Could not load users');
+      }
+    };
+    fetchUsers();
+
+    // Click outside handler
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleImportant = async () => {
+    try {
+      const { data } = await api.put(`/messages/${msg.id}/important`);
+      onUpdate({ isImportant: data.isImportant, markedImportantBy: data.markedImportantBy });
+      toast.success(data.isImportant ? 'Marked as important' : 'Removed important flag');
+      onClose();
+    } catch (e) {
+      toast.error('Failed to update');
+    }
+  };
+
+  const handleAssign = async (username) => {
+    try {
+      const { data } = await api.put(`/messages/${msg.id}/assign`, { assignedTo: username });
+      onUpdate({ assignedTo: data.assignedTo, assignedBy: data.assignedBy });
+      toast.success(`Assigned to ${username}`);
+      onClose();
+    } catch (e) {
+      toast.error('Failed to assign');
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    try {
+      const { data } = await api.put(`/messages/${msg.id}/notes`, { notes: notesText });
+      onUpdate({ notes: data.notes, notesAddedBy: data.notesAddedBy });
+      toast.success('Notes saved');
+      onClose();
+    } catch (e) {
+      toast.error('Failed to save notes');
+    }
+  };
+
+  const filteredUsers = users.filter(u =>
+    u.username.toLowerCase().includes(assignSearch.toLowerCase())
+  );
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-0 top-full mt-1 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden"
+    >
+      {mode === null && (
+        <div className="py-2">
+          <button
+            onClick={handleImportant}
+            className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors"
+          >
+            <Star size={16} className={msg.isImportant ? 'text-amber-500 fill-current' : 'text-gray-400'} />
+            <span>{msg.isImportant ? 'Remove Important' : 'Mark as Important'}</span>
+          </button>
+          <button
+            onClick={() => setMode('assign')}
+            className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors"
+          >
+            <UserPlus size={16} className="text-gray-400" />
+            <span>Assign to...</span>
+          </button>
+          <button
+            onClick={() => setMode('notes')}
+            className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors"
+          >
+            <StickyNote size={16} className="text-gray-400" />
+            <span>{msg.notes ? 'Edit Notes' : 'Add Notes'}</span>
+          </button>
+        </div>
+      )}
+
+      {mode === 'assign' && (
+        <div className="p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase">Assign To</span>
+            <button onClick={() => setMode(null)} className="p-1 hover:bg-gray-100 rounded">
+              <X size={14} className="text-gray-400" />
+            </button>
+          </div>
+          <input
+            type="text"
+            value={assignSearch}
+            onChange={(e) => setAssignSearch(e.target.value)}
+            placeholder="Search or type username..."
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            autoFocus
+          />
+          <div className="max-h-32 overflow-y-auto">
+            {filteredUsers.map(user => (
+              <button
+                key={user.id}
+                onClick={() => handleAssign(user.username)}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-indigo-50 rounded-lg flex items-center gap-2"
+              >
+                <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center text-xs font-bold text-indigo-600">
+                  {user.username.charAt(0).toUpperCase()}
+                </div>
+                <span>{user.username}</span>
+                <span className="text-xs text-gray-400 ml-auto">{user.role}</span>
+              </button>
+            ))}
+            {assignSearch && !filteredUsers.some(u => u.username === assignSearch) && (
+              <button
+                onClick={() => handleAssign(assignSearch)}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-indigo-50 rounded-lg text-indigo-600"
+              >
+                Assign to "{assignSearch}"
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {mode === 'notes' && (
+        <div className="p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase">Add Notes</span>
+            <button onClick={() => setMode(null)} className="p-1 hover:bg-gray-100 rounded">
+              <X size={14} className="text-gray-400" />
+            </button>
+          </div>
+          <textarea
+            value={notesText}
+            onChange={(e) => setNotesText(e.target.value)}
+            placeholder="Add notes visible to all team members..."
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-2 min-h-[80px] focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            autoFocus
+          />
+          <button
+            onClick={handleSaveNotes}
+            className="w-full py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Save Notes
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============ MAIN MESSAGE CARD ============
+const MessageCard = ({ msg, onApprove, onUpdateMessage }) => {
   const [draft, setDraft] = useState(msg.aiDraft || "");
   const [sending, setSending] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [localMsg, setLocalMsg] = useState(msg);
 
-  const normalizedIntent = (msg.intent || "").trim().toLowerCase();
+  // Update local state when msg changes
+  useEffect(() => {
+    setLocalMsg(msg);
+  }, [msg]);
+
+  const normalizedIntent = (localMsg.intent || "").trim().toLowerCase();
   const intentClasses =
     normalizedIntent === "spam"
       ? "bg-red-100 text-red-600"
       : normalizedIntent === "complaint"
-      ? "bg-amber-100 text-amber-700"
-      : normalizedIntent === "praise"
-      ? "bg-emerald-100 text-emerald-700"
-      : normalizedIntent === "technical issue"
-      ? "bg-blue-100 text-blue-700"
-      : normalizedIntent === "question"
-      ? "bg-indigo-100 text-indigo-700"
-      : "bg-gray-100 text-gray-600";
-  const intentLabel = msg.intent || "General";
+        ? "bg-amber-100 text-amber-700"
+        : normalizedIntent === "praise"
+          ? "bg-emerald-100 text-emerald-700"
+          : normalizedIntent === "technical issue"
+            ? "bg-blue-100 text-blue-700"
+            : normalizedIntent === "question"
+              ? "bg-indigo-100 text-indigo-700"
+              : "bg-gray-100 text-gray-600";
+  const intentLabel = localMsg.intent || "General";
 
   const handleClick = async () => {
     if (sending) return;
     setSending(true);
-    const success = await onApprove(msg.id, draft);
+    const success = await onApprove(localMsg.id, draft);
     if (!success) {
       setSending(false);
     }
   };
 
+  const handleUpdate = (updates) => {
+    setLocalMsg(prev => ({ ...prev, ...updates }));
+    if (onUpdateMessage) {
+      onUpdateMessage(localMsg.id, updates);
+    }
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${localMsg.isImportant ? 'border-amber-300 ring-2 ring-amber-100' : 'border-gray-200'
+      }`}>
       <div className="p-6">
+        {/* Header */}
         <div className="flex justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">
-              {msg.authorName?.[0]?.toUpperCase() || "?"}
+            <div className="w-10 h-10 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center text-sm font-bold text-gray-600">
+              {localMsg.authorName?.[0]?.toUpperCase() || "?"}
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 text-sm">@{msg.authorName}</h3>
+              <h3 className="font-semibold text-gray-900">@{localMsg.authorName}</h3>
               <p className="text-xs text-gray-500">
-                {new Date(msg.createdAt).toLocaleString()}
+                {new Date(localMsg.createdAt).toLocaleString()}
               </p>
             </div>
           </div>
-          <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${intentClasses}`}>
-            {intentLabel}
-          </span>
+
+          <div className="flex items-center gap-2">
+            {/* Badges */}
+            {localMsg.isImportant && (
+              <span className="flex items-center gap-1 px-2 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-medium">
+                <Star size={12} className="fill-current" />
+                {localMsg.markedImportantBy}
+              </span>
+            )}
+            {localMsg.assignedTo && (
+              <span className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-medium">
+                <UserPlus size={12} />
+                {localMsg.assignedTo}
+              </span>
+            )}
+
+            {/* Intent Badge */}
+            <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${intentClasses}`}>
+              {intentLabel}
+            </span>
+
+            {/* 3-dot Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <MoreVertical size={18} className="text-gray-400" />
+              </button>
+              {showMenu && (
+                <ActionsMenu
+                  msg={localMsg}
+                  onUpdate={handleUpdate}
+                  onClose={() => setShowMenu(false)}
+                />
+              )}
+            </div>
+          </div>
         </div>
-        <p className="text-gray-800 text-sm mb-4 bg-gray-50 p-3 rounded-lg">
-          "{msg.content}"
+
+        {/* Notes Banner */}
+        {localMsg.notes && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <StickyNote size={14} className="text-yellow-600" />
+              <span className="text-xs font-medium text-yellow-700">
+                Note by @{localMsg.notesAddedBy}
+              </span>
+            </div>
+            <p className="text-sm text-yellow-800">{localMsg.notes}</p>
+          </div>
+        )}
+
+        {/* Customer Message */}
+        <p className="text-gray-800 text-sm mb-4 bg-gray-50 p-4 rounded-lg">
+          "{localMsg.content}"
         </p>
-        <textarea
-          className="w-full p-3 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 min-h-[80px]"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Draft reply..."
-          disabled={sending}
-        />
+
+        {/* AI Draft - Auto-expanding */}
+        <div className="mb-0">
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 block">
+            AI Generated Reply
+          </label>
+          <textarea
+            className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Draft reply..."
+            disabled={sending}
+            style={{ minHeight: '80px', height: 'auto' }}
+            rows={Math.max(3, Math.ceil(draft.length / 60))}
+          />
+        </div>
       </div>
+
+      {/* Footer */}
       <div className="bg-gray-50 px-6 py-3 border-t flex justify-end gap-3">
-        <button disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-3 py-2 font-medium">
+        <button disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
           Dismiss
         </button>
         <button
           onClick={handleClick}
           disabled={sending}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2"
+          className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
         >
           {sending && <RefreshCw className="animate-spin" size={14} />}
           {sending ? "Sending..." : "Approve & Send"}

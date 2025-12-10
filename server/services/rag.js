@@ -18,14 +18,38 @@ const chroma = new CloudClient({
   database: CHROMA_DATABASE,
 });
 
+// ---------- RETRY HELPER FOR RATE LIMITS ----------
+async function retryWithBackoff(fn, maxRetries = 3, baseDelayMs = 2000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRateLimited = error.status === 429 ||
+        error.message?.includes('429') ||
+        error.message?.includes('rate') ||
+        error.message?.includes('capacity');
+
+      if (isRateLimited && attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1);
+        console.log(`⏳ Rate limited (attempt ${attempt}/${maxRetries}). Waiting ${delay / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
 // ---------- EMBEDDINGS USING MISTRAL ----------
 async function getEmbeddings(texts) {
   try {
-    const response = await mistral.embeddings.create({
-      model: 'mistral-embed',
-      inputs: texts,
+    return await retryWithBackoff(async () => {
+      const response = await mistral.embeddings.create({
+        model: 'mistral-embed',
+        inputs: texts,
+      });
+      return response.data.map((item) => item.embedding);
     });
-    return response.data.map((item) => item.embedding);
   } catch (error) {
     console.error('❌ Embedding Error:', error.message);
     return [];
@@ -112,13 +136,16 @@ async function analyzeAndDraft(text, platform) {
   `;
 
   try {
-    const chatResponse = await mistral.chat.complete({
-      model: 'mistral-small-latest',
-      messages: [{ role: 'user', content: prompt }],
-      responseFormat: { type: 'json_object' },
+    const result = await retryWithBackoff(async () => {
+      const chatResponse = await mistral.chat.complete({
+        model: 'mistral-small-latest',
+        messages: [{ role: 'user', content: prompt }],
+        responseFormat: { type: 'json_object' },
+      });
+      return chatResponse;
     });
 
-    const content = chatResponse.choices[0].message.content;
+    const content = result.choices[0].message.content;
     return JSON.parse(content);
   } catch (error) {
     console.error('❌ Mistral Chat Error:', error.message);

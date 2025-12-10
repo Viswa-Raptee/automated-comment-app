@@ -2,14 +2,13 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
-const { Message } = require('../database'); // Ensure correct path to database
+const { Message, Post, Notification, User } = require('../database');
 const { analyzeAndDraft } = require('./rag');
 
 // --- AUTH HELPERS ---
 function loadClientSecrets() {
     try {
-        // adjust path as needed depending on where you run server.js
-        const p = path.join(__dirname, '..', 'client_secrets.json'); 
+        const p = path.join(__dirname, '..', 'client_secrets.json');
         if (fs.existsSync(p)) {
             const raw = fs.readFileSync(p, 'utf-8');
             const cfg = JSON.parse(raw);
@@ -20,8 +19,8 @@ function loadClientSecrets() {
                 redirectUri: web.redirect_uris?.[0] || process.env.YT_REDIRECT_URI
             };
         }
-    } catch (e) {}
-    
+    } catch (e) { }
+
     return {
         clientId: process.env.YT_CLIENT_ID,
         clientSecret: process.env.YT_CLIENT_SECRET,
@@ -69,6 +68,33 @@ async function postYouTubeReply(commentId, text, account) {
     }
 }
 
+// --- AUTO-NOTIFICATION HELPER ---
+async function notifyAllUsersForIntent(message, intent, accountId, postId) {
+    const normalizedIntent = (intent || '').toLowerCase();
+    if (normalizedIntent !== 'complaint' && normalizedIntent !== 'question') {
+        return;
+    }
+
+    try {
+        const allUsers = await User.findAll({ attributes: ['id', 'username'] });
+        const notificationType = normalizedIntent === 'complaint' ? 'complaint' : 'question';
+
+        for (const user of allUsers) {
+            await Notification.create({
+                userId: user.id,
+                type: notificationType,
+                messageId: message.id,
+                accountId: accountId,
+                postId: postId,
+                content: `New ${notificationType}: "${message.content.substring(0, 60)}..."`,
+                fromUser: 'System'
+            });
+        }
+    } catch (err) {
+        console.error('Auto-notification failed:', err.message);
+    }
+}
+
 // --- SYNC LOGIC (Fetching Data for Master-Detail View) ---
 async function syncAccount(account) {
     let newCount = 0;
@@ -78,62 +104,124 @@ async function syncAccount(account) {
         try {
             const oauth2Client = getOAuthClientWithRefresh(account.secondaryToken);
             const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
-            
+
             // Get Uploads Playlist
             const channels = await youtube.channels.list({ mine: true, part: 'contentDetails' });
             const uploadsId = channels.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
-            
+
             if (uploadsId) {
                 // Fetch recent videos from uploads
-                const plist = await youtube.playlistItems.list({ 
-                    playlistId: uploadsId, 
-                    part: 'snippet', 
-                    maxResults: 10 
+                const plist = await youtube.playlistItems.list({
+                    playlistId: uploadsId,
+                    part: 'snippet',
+                    maxResults: 10
                 });
+
+                const videoIds = [];
+                const videoDataMap = {};
 
                 for (const item of plist.data.items || []) {
                     const videoId = item.snippet?.resourceId?.videoId;
-                    const videoTitle = item.snippet?.title; // <--- CAPTURED FOR UI
-                    const thumb = item.snippet?.thumbnails?.medium?.url; // <--- CAPTURED FOR UI
-                    
                     if (!videoId) continue;
 
-                    // Fetch threads for this video
-                    const threads = await youtube.commentThreads.list({ 
-                        part: 'snippet', 
-                        videoId, 
-                        maxResults: 20, 
-                        textFormat: 'plainText' 
-                    });
+                    videoIds.push(videoId);
+                    videoDataMap[videoId] = {
+                        title: item.snippet?.title,
+                        thumb: item.snippet?.thumbnails?.medium?.url,
+                        publishedAt: item.snippet?.publishedAt
+                    };
+                }
 
-                    for (const th of threads.data.items || []) {
-                        const sn = th.snippet.topLevelComment.snippet;
-                        const externalId = th.id;
+                // Fetch video statistics in batch
+                if (videoIds.length > 0) {
+                    try {
+                        const statsResponse = await youtube.videos.list({
+                            part: 'statistics,snippet',
+                            id: videoIds.join(',')
+                        });
 
-                        // Check if message exists
-                        const exists = await Message.findOne({ where: { externalId } });
-                        if (!exists) {
-                            const ai = await analyzeAndDraft(sn.textDisplay, 'youtube');
-                            
-                            await Message.create({
-                                platform: 'youtube',
-                                accountId: account.id,
-                                externalId,
-                                
-                                // Grouping Fields
-                                postId: videoId,
-                                postTitle: videoTitle, 
-                                mediaUrl: thumb,
+                        for (const video of statsResponse.data.items || []) {
+                            const videoId = video.id;
+                            const stats = video.statistics || {};
+                            const embedUrl = `https://www.youtube.com/embed/${videoId}`;
 
-                                authorName: sn.authorDisplayName,
-                                authorId: sn.authorChannelId?.value || '',
-                                content: sn.textDisplay,
-                                intent: ai.intent,
-                                aiDraft: ai.reply,
-                                status: 'pending'
+                            // Create or Update Post record
+                            const [post, created] = await Post.findOrCreate({
+                                where: { postId: videoId },
+                                defaults: {
+                                    accountId: account.id,
+                                    platform: 'youtube',
+                                    postId: videoId,
+                                    postTitle: videoDataMap[videoId]?.title || video.snippet?.title,
+                                    mediaUrl: videoDataMap[videoId]?.thumb || video.snippet?.thumbnails?.medium?.url,
+                                    embedUrl: embedUrl,
+                                    viewCount: parseInt(stats.viewCount) || 0,
+                                    likeCount: parseInt(stats.likeCount) || 0,
+                                    commentCount: parseInt(stats.commentCount) || 0,
+                                    shareCount: 0, // YouTube doesn't expose shares
+                                    publishedAt: videoDataMap[videoId]?.publishedAt,
+                                    lastSyncedAt: new Date()
+                                }
                             });
-                            newCount++;
+
+                            if (!created) {
+                                // Update existing post stats
+                                await post.update({
+                                    postTitle: videoDataMap[videoId]?.title || post.postTitle,
+                                    viewCount: parseInt(stats.viewCount) || post.viewCount,
+                                    likeCount: parseInt(stats.likeCount) || post.likeCount,
+                                    commentCount: parseInt(stats.commentCount) || post.commentCount,
+                                    lastSyncedAt: new Date()
+                                });
+                            }
                         }
+                    } catch (statsErr) {
+                        console.error('YT Stats Fetch Error:', statsErr.message);
+                    }
+                }
+
+                // Fetch comments for each video
+                for (const videoId of videoIds) {
+                    const videoData = videoDataMap[videoId];
+
+                    try {
+                        const threads = await youtube.commentThreads.list({
+                            part: 'snippet',
+                            videoId,
+                            maxResults: 20,
+                            textFormat: 'plainText'
+                        });
+
+                        for (const th of threads.data.items || []) {
+                            const sn = th.snippet.topLevelComment.snippet;
+                            const externalId = th.id;
+
+                            const exists = await Message.findOne({ where: { externalId } });
+                            if (!exists) {
+                                const ai = await analyzeAndDraft(sn.textDisplay, 'youtube');
+
+                                const newMsg = await Message.create({
+                                    platform: 'youtube',
+                                    accountId: account.id,
+                                    externalId,
+                                    postId: videoId,
+                                    postTitle: videoData?.title,
+                                    mediaUrl: videoData?.thumb,
+                                    authorName: sn.authorDisplayName,
+                                    authorId: sn.authorChannelId?.value || '',
+                                    content: sn.textDisplay,
+                                    intent: ai.intent,
+                                    aiDraft: ai.reply,
+                                    status: 'pending'
+                                });
+
+                                // Auto-notify for complaints/questions
+                                await notifyAllUsersForIntent(newMsg, ai.intent, account.id, videoId);
+                                newCount++;
+                            }
+                        }
+                    } catch (commentErr) {
+                        console.error(`YT Comments Error for ${videoId}:`, commentErr.message);
                     }
                 }
             }
@@ -141,44 +229,72 @@ async function syncAccount(account) {
             console.error('YT Sync Failed:', e.message);
         }
     }
-    
+
     // 2. INSTAGRAM SYNC
     if (account.platform === 'instagram') {
-        // Updated URL to fetch Caption and Media URL for the UI
-        const fields = 'caption,media_url,thumbnail_url,comments{id,text,username,timestamp}';
+        // Fetch media with insights
+        const fields = 'id,caption,media_type,media_url,thumbnail_url,permalink,like_count,comments_count,timestamp,comments{id,text,username,timestamp}';
         const url = `https://graph.facebook.com/v19.0/${account.identifier}/media?fields=${fields}&access_token=${account.accessToken}`;
-        
+
         try {
             const resp = await axios.get(url);
             const mediaList = resp.data.data || [];
-            
+
             for (const media of mediaList) {
-                // Determine Media URL (Video has thumbnail_url, Image has media_url)
                 const mediaImage = media.thumbnail_url || media.media_url;
                 const postTitle = media.caption ? media.caption.substring(0, 50) + "..." : "Instagram Post";
+                const embedUrl = media.permalink; // Instagram embed uses permalink
 
+                // Create or Update Post record
+                const [post, created] = await Post.findOrCreate({
+                    where: { postId: media.id },
+                    defaults: {
+                        accountId: account.id,
+                        platform: 'instagram',
+                        postId: media.id,
+                        postTitle: postTitle,
+                        mediaUrl: mediaImage,
+                        embedUrl: embedUrl,
+                        viewCount: 0, // Instagram doesn't expose views for all content
+                        likeCount: parseInt(media.like_count) || 0,
+                        commentCount: parseInt(media.comments_count) || 0,
+                        shareCount: 0,
+                        publishedAt: media.timestamp,
+                        lastSyncedAt: new Date()
+                    }
+                });
+
+                if (!created) {
+                    await post.update({
+                        likeCount: parseInt(media.like_count) || post.likeCount,
+                        commentCount: parseInt(media.comments_count) || post.commentCount,
+                        lastSyncedAt: new Date()
+                    });
+                }
+
+                // Process comments
                 if (media.comments) {
                     for (const c of media.comments.data) {
                         const exists = await Message.findOne({ where: { externalId: c.id } });
                         if (!exists) {
                             const ai = await analyzeAndDraft(c.text, 'instagram');
-                            
-                            await Message.create({
+
+                            const newMsg = await Message.create({
                                 platform: 'instagram',
                                 accountId: account.id,
                                 externalId: c.id,
-                                
-                                // Grouping Fields
                                 postId: media.id,
                                 postTitle: postTitle,
                                 mediaUrl: mediaImage,
-
                                 authorName: c.username,
                                 content: c.text,
                                 intent: ai.intent,
                                 aiDraft: ai.reply,
                                 status: 'pending'
                             });
+
+                            // Auto-notify for complaints/questions
+                            await notifyAllUsersForIntent(newMsg, ai.intent, account.id, media.id);
                             newCount++;
                         }
                     }
@@ -188,13 +304,13 @@ async function syncAccount(account) {
             console.error("IG Sync Failed:", e.message);
         }
     }
-    
+
     return newCount;
 }
 
-module.exports = { 
-    postInstagramReply, 
-    postYouTubeReply, 
+module.exports = {
+    postInstagramReply,
+    postYouTubeReply,
     syncAccount,
-    loadClientSecrets // Exported for server.js to use in OAuth handshake
+    loadClientSecrets
 };
