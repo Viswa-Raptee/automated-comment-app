@@ -572,6 +572,28 @@ app.get('/api/users/list', authenticate, async (req, res) => {
     }
 });
 
+// Edit posted reply (update aiDraft and audit)
+app.put('/api/messages/:id/edit-reply', authenticate, async (req, res) => {
+    const { replyText } = req.body;
+    try {
+        const msg = await Message.findByPk(req.params.id);
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+        if (msg.status !== 'posted') return res.status(400).json({ error: 'Can only edit posted messages' });
+
+        const previousReply = msg.aiDraft;
+        msg.aiDraft = replyText;
+        msg.editedBy = req.user.username;
+        msg.editedAt = new Date();
+        await msg.save();
+
+        console.log(`📝 Reply edited by ${req.user.username}: "${previousReply}" -> "${replyText}"`);
+
+        res.json({ success: true, message: msg });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ==========================================
 // 9. NOTIFICATIONS
 // ==========================================

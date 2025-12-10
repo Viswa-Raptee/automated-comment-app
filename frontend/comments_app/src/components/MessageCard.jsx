@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw, MoreVertical, Star, UserPlus, StickyNote, X } from 'lucide-react';
+import { RefreshCw, MoreVertical, Star, UserPlus, StickyNote, X, CheckCircle } from 'lucide-react';
 import api from '../api/api';
 import { toast } from 'react-hot-toast';
 
@@ -171,15 +171,17 @@ const ActionsMenu = ({ msg, onUpdate, onClose }) => {
 };
 
 // ============ MAIN MESSAGE CARD ============
-const MessageCard = ({ msg, onApprove, onUpdateMessage }) => {
+const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) => {
   const [draft, setDraft] = useState(msg.aiDraft || "");
   const [sending, setSending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [localMsg, setLocalMsg] = useState(msg);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Update local state when msg changes
   useEffect(() => {
     setLocalMsg(msg);
+    setDraft(msg.aiDraft || "");
   }, [msg]);
 
   const normalizedIntent = (localMsg.intent || "").trim().toLowerCase();
@@ -206,6 +208,21 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage }) => {
     }
   };
 
+  const handleEditSave = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      await api.put(`/messages/${localMsg.id}/edit-reply`, { replyText: draft });
+      toast.success("Reply updated!");
+      setIsEditing(false);
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      toast.error("Failed to update reply");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleUpdate = (updates) => {
     setLocalMsg(prev => ({ ...prev, ...updates }));
     if (onUpdateMessage) {
@@ -214,8 +231,27 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage }) => {
   };
 
   return (
-    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${localMsg.isImportant ? 'border-amber-300 ring-2 ring-amber-100' : 'border-gray-200'
+    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${localMsg.isImportant ? 'border-amber-300 ring-2 ring-amber-100' :
+      isPosted ? 'border-green-200' : 'border-gray-200'
       }`}>
+      {/* Posted Badge */}
+      {isPosted && (
+        <div className="bg-green-50 border-b border-green-100 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-green-700 text-xs font-medium">
+            <CheckCircle size={14} />
+            Reply sent by @{localMsg.approvedBy} on {localMsg.postedAt ? new Date(localMsg.postedAt).toLocaleString() : 'Unknown'}
+          </div>
+          {!isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+            >
+              Edit Reply
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="p-6">
         {/* Header */}
         <div className="flex justify-between mb-4">
@@ -288,39 +324,67 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage }) => {
           "{localMsg.content}"
         </p>
 
-        {/* AI Draft - Auto-expanding */}
+        {/* AI Draft / Reply */}
         <div className="mb-0">
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 block">
-            AI Generated Reply
+            {isPosted ? 'Sent Reply' : 'AI Generated Reply'}
           </label>
-          <textarea
-            className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Draft reply..."
-            disabled={sending}
-            style={{ minHeight: '80px', height: 'auto' }}
-            rows={Math.max(3, Math.ceil(draft.length / 60))}
-          />
+          {isPosted && !isEditing ? (
+            <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-sm text-gray-800">
+              {localMsg.aiDraft}
+            </div>
+          ) : (
+            <textarea
+              className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Draft reply..."
+              disabled={sending}
+              style={{ minHeight: '80px', height: 'auto' }}
+              rows={Math.max(3, Math.ceil(draft.length / 60))}
+            />
+          )}
         </div>
       </div>
 
       {/* Footer */}
       <div className="bg-gray-50 px-6 py-3 border-t flex justify-end gap-3">
-        <button disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
-          Dismiss
-        </button>
-        <button
-          onClick={handleClick}
-          disabled={sending}
-          className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
-        >
-          {sending && <RefreshCw className="animate-spin" size={14} />}
-          {sending ? "Sending..." : "Approve & Send"}
-        </button>
+        {isPosted && isEditing ? (
+          <>
+            <button
+              onClick={() => { setIsEditing(false); setDraft(localMsg.aiDraft || ""); }}
+              className="text-sm text-gray-600 hover:text-gray-800 px-4 py-2 font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEditSave}
+              disabled={sending}
+              className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
+            >
+              {sending && <RefreshCw className="animate-spin" size={14} />}
+              {sending ? "Saving..." : "Save Changes"}
+            </button>
+          </>
+        ) : !isPosted ? (
+          <>
+            <button disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
+              Dismiss
+            </button>
+            <button
+              onClick={handleClick}
+              disabled={sending}
+              className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
+            >
+              {sending && <RefreshCw className="animate-spin" size={14} />}
+              {sending ? "Sending..." : "Approve & Send"}
+            </button>
+          </>
+        ) : null}
       </div>
     </div>
   );
 };
 
 export default MessageCard;
+

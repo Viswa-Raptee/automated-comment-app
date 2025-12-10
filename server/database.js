@@ -96,7 +96,11 @@ const Message = sequelize.define('Message', {
   assignedTo: { type: DataTypes.STRING },
   assignedBy: { type: DataTypes.STRING },
   notes: { type: DataTypes.TEXT },
-  notesAddedBy: { type: DataTypes.STRING }
+  notesAddedBy: { type: DataTypes.STRING },
+
+  // === Edit tracking ===
+  editedBy: { type: DataTypes.STRING },
+  editedAt: { type: DataTypes.DATE }
 });
 
 // --- 4. NOTIFICATION ---
@@ -138,6 +142,8 @@ async function syncDatabase() {
       { table: 'Messages', column: 'assignedBy', type: 'TEXT' },
       { table: 'Messages', column: 'notes', type: 'TEXT' },
       { table: 'Messages', column: 'notesAddedBy', type: 'TEXT' },
+      { table: 'Messages', column: 'editedBy', type: 'TEXT' },
+      { table: 'Messages', column: 'editedAt', type: 'DATETIME' },
       // Post table
       { table: 'Posts', column: 'viewCount', type: 'INTEGER DEFAULT 0' },
       { table: 'Posts', column: 'likeCount', type: 'INTEGER DEFAULT 0' },

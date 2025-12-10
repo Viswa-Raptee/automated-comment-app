@@ -150,6 +150,7 @@ const InboxPage = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('pending'); // 'all', 'pending', 'posted'
 
   const currentPost = posts[currentPostIndex] || null;
 
@@ -201,19 +202,23 @@ const InboxPage = () => {
     }
   }, [selectedAccount, fetchPosts]);
 
-  // Fetch messages when current post changes
+  // Fetch messages when current post or filter changes
   const fetchMessages = useCallback(async () => {
     if (!selectedAccount || !currentPost) {
       setMessages([]);
       return;
     }
     try {
-      const { data } = await api.get(`/messages?accountId=${selectedAccount.id}&status=pending&postId=${currentPost.postId}`);
+      let url = `/messages?accountId=${selectedAccount.id}&postId=${currentPost.postId}`;
+      if (statusFilter !== 'all') {
+        url += `&status=${statusFilter}`;
+      }
+      const { data } = await api.get(url);
       setMessages(data);
     } catch (e) {
       console.error("Could not load comments:", e);
     }
-  }, [selectedAccount, currentPost]);
+  }, [selectedAccount, currentPost, statusFilter]);
 
   useEffect(() => {
     fetchMessages();
@@ -422,14 +427,30 @@ const InboxPage = () => {
         {/* Comments Panel */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-3xl mx-auto">
-            {/* Comments Header */}
+            {/* Comments Header with Filter Tabs */}
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold text-gray-900">
-                Pending Comments
+                Comments
                 <span className="ml-2 text-sm font-normal text-gray-500">
                   ({messages.length})
                 </span>
               </h3>
+
+              {/* Filter Tabs */}
+              <div className="flex bg-gray-100 p-1 rounded-lg">
+                {['all', 'pending', 'posted'].map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setStatusFilter(f)}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all capitalize ${statusFilter === f
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Comments List */}
@@ -438,13 +459,25 @@ const InboxPage = () => {
                 <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <CheckCircle size={32} className="text-green-500" />
                 </div>
-                <p className="text-gray-600 font-medium">No pending comments</p>
-                <p className="text-sm text-gray-400 mt-1">All caught up for this post!</p>
+                <p className="text-gray-600 font-medium">
+                  {statusFilter === 'pending' ? 'No pending comments' :
+                    statusFilter === 'posted' ? 'No posted comments' : 'No comments'}
+                </p>
+                <p className="text-sm text-gray-400 mt-1">
+                  {statusFilter === 'pending' ? 'All caught up for this post!' :
+                    statusFilter === 'posted' ? 'No replies have been sent yet' : 'No comments found'}
+                </p>
               </div>
             ) : (
               <div className="space-y-4">
                 {messages.map(msg => (
-                  <MessageCard key={msg.id} msg={msg} onApprove={handleApprove} />
+                  <MessageCard
+                    key={msg.id}
+                    msg={msg}
+                    onApprove={handleApprove}
+                    onRefresh={fetchMessages}
+                    isPosted={msg.status === 'posted'}
+                  />
                 ))}
               </div>
             )}

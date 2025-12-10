@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAccounts } from '../context/AccountContext';
+import rapteeLogo from '../assets/Main - Raptee Sec White.jpg';
 
 const Sidebar = () => {
   const { user, logout } = useAuth();
@@ -19,7 +20,7 @@ const Sidebar = () => {
   }, []);
 
   const isActive = (path) => location.pathname === path;
-  const isAccountActive = (accountId) => location.pathname === `/account/${accountId}`;
+  const isAccountActive = (accountId) => location.pathname.startsWith(`/account/${accountId}`);
 
   const menuItemClass = (active) => `
     flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200
@@ -31,16 +32,14 @@ const Sidebar = () => {
 
   return (
     <div className="w-64 bg-gradient-to-b from-gray-900 via-gray-900 to-gray-950 text-white h-screen flex flex-col flex-shrink-0 border-r border-gray-800/50">
-      {/* Logo Header */}
-      <div className="p-5 border-b border-gray-800/50">
-        <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
-            <span className="text-white font-bold text-xl">R</span>
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-white">Raptee</h1>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Comment Manager</p>
-          </div>
+      {/* Logo Header - Expanded */}
+      <div className="p-4 border-b border-gray-800/50">
+        <Link to="/" className="block group">
+          <img
+            src={rapteeLogo}
+            alt="Raptee"
+            className="w-full h-auto max-h-16 object-contain group-hover:scale-105 transition-transform"
+          />
         </Link>
       </div>
 

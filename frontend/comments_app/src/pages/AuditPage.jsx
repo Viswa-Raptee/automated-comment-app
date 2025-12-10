@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import api from '../api/api'; // Ensure this matches your axios export
-import { 
-  MessageSquare, Send, User, Clock, CheckCircle2, 
+import {
+  MessageSquare, Send, User, Clock, CheckCircle2,
   Youtube, Instagram, Filter
 } from 'lucide-react';
 
@@ -28,7 +28,7 @@ const AuditPage = () => {
   useEffect(() => { fetchLogs(); }, []);
 
   // Filter logs locally based on platform
-  const filteredLogs = logs.filter(log => 
+  const filteredLogs = logs.filter(log =>
     filter === 'all' ? true : log.Account?.platform === filter
   );
 
@@ -47,7 +47,7 @@ const AuditPage = () => {
 
   return (
     <div className="p-8 max-w-6xl mx-auto h-full overflow-y-auto bg-gray-50/50">
-      
+
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
@@ -65,11 +65,10 @@ const AuditPage = () => {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
-                filter === f 
-                  ? 'bg-gray-100 text-gray-900 shadow-sm' 
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${filter === f
+                  ? 'bg-gray-100 text-gray-900 shadow-sm'
                   : 'text-gray-500 hover:text-gray-700'
-              }`}
+                }`}
             >
               {f === 'all' ? 'All' : <span className="capitalize">{f}</span>}
             </button>
@@ -107,14 +106,13 @@ const AuditPage = () => {
             {filteredLogs.map((log) => (
               <div key={log.id} className="p-6 hover:bg-gray-50/80 transition-colors group">
                 <div className="flex gap-4">
-                  
+
                   {/* Left: Platform Icon */}
                   <div className="flex-shrink-0 mt-1">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm border ${
-                      log.Account?.platform === 'youtube' 
-                        ? 'bg-red-50 border-red-100 text-red-600' 
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm border ${log.Account?.platform === 'youtube'
+                        ? 'bg-red-50 border-red-100 text-red-600'
                         : 'bg-pink-50 border-pink-100 text-pink-600'
-                    }`}>
+                      }`}>
                       {log.Account?.platform === 'youtube' ? <Youtube size={20} /> : <Instagram size={20} />}
                     </div>
                   </div>
@@ -158,6 +156,17 @@ const AuditPage = () => {
                       <p className="text-sm text-gray-800 leading-relaxed">
                         {log.aiDraft}
                       </p>
+
+                      {/* Edit Badge - Show if message was edited */}
+                      {log.editedBy && (
+                        <div className="mt-2 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100 w-fit">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                          <span>Edited by <strong>@{log.editedBy}</strong> on {new Date(log.editedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
