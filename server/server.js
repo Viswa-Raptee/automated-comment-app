@@ -119,11 +119,12 @@ app.get('/api/youtube/oauth/callback', async (req, res) => {
         acc.name = channel.snippet.title;
         await acc.save();
 
-        console.log("✅ OAuth Success! Redirecting...");
-        res.redirect('http://localhost:8080'); // Redirect to your running React App
+        console.log("✅ OAuth Success! Redirecting with accountId:", acc.id);
+        // Redirect with accountId so frontend can trigger onboarding
+        res.redirect(`http://localhost:8080/manage-accounts?status=success&accountId=${acc.id}`);
     } catch (e) {
         console.error("OAuth Callback Error:", e.response?.data || e.message);
-        res.status(500).send(`Authentication failed: ${e.message}`);
+        res.redirect(`http://localhost:8080/manage-accounts?status=error&message=${encodeURIComponent(e.message)}`);
     }
 });
 
@@ -152,9 +153,120 @@ app.put('/api/accounts/:id', authenticate, isAdmin, async (req, res) => {
 
 app.delete('/api/accounts/:id', authenticate, isAdmin, async (req, res) => {
     try {
-        await Account.destroy({ where: { id: req.params.id } });
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        const accountId = req.params.id;
+        const deleteData = req.query.deleteData !== 'false'; // default true
+
+        if (deleteData) {
+            // Delete all related records (full delete)
+            await Notification.destroy({ where: { accountId } });
+            await Message.destroy({ where: { accountId } });
+            await Post.destroy({ where: { accountId } });
+        }
+
+        await Account.destroy({ where: { id: accountId } });
+        res.json({ success: true, dataDeleted: deleteData });
+    } catch (e) {
+        console.error('Delete account error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ==========================================
+// 3B. ACCOUNT ONBOARDING (New Accounts)
+// ==========================================
+
+const batchProcessor = require('./services/batchProcessor');
+const { analyzeAndDraft } = require('./services/rag');
+
+// Onboard account - sync and return summary (NO AI generation)
+app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
+    try {
+        const account = await Account.findByPk(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        // Sync the account to fetch videos and comments (skip AI generation)
+        const newCount = await syncAccount(account, { skipAiGeneration: true });
+
+        // Get summary stats
+        const [videoCount, totalComments, unrepliedCount] = await Promise.all([
+            Post.count({ where: { accountId: account.id } }),
+            Message.count({ where: { accountId: account.id } }),
+            Message.count({ where: { accountId: account.id, status: 'pending' } })
+        ]);
+
+        res.json({
+            success: true,
+            account: {
+                id: account.id,
+                name: account.name,
+                platform: account.platform
+            },
+            summary: {
+                videos: videoCount,
+                totalComments,
+                unrepliedComments: unrepliedCount,
+                newComments: newCount
+            }
+        });
+    } catch (e) {
+        console.error('Onboard error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Batch generate replies for past comments
+app.post('/api/accounts/:id/batch-generate', authenticate, async (req, res) => {
+    try {
+        const account = await Account.findByPk(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        // Get all pending comments without AI drafts
+        const pendingComments = await Message.findAll({
+            where: {
+                accountId: account.id,
+                status: 'pending'
+            },
+            order: [['createdAt', 'ASC']]
+        });
+
+        if (pendingComments.length === 0) {
+            return res.json({ success: true, message: 'No comments to process', jobId: null });
+        }
+
+        // Create a job
+        const jobId = batchProcessor.createJob(account.id, pendingComments.length);
+
+        // Start batch processing asynchronously (don't await)
+        batchProcessor.processBatch(jobId, pendingComments, async (comment) => {
+            // Only generate if no draft exists
+            if (!comment.aiDraft) {
+                const result = await analyzeAndDraft(comment.content, comment.platform || 'youtube');
+                await comment.update({
+                    intent: result.intent,
+                    aiDraft: result.reply
+                });
+            }
+        });
+
+        res.json({
+            success: true,
+            jobId,
+            total: pendingComments.length,
+            message: 'Batch processing started'
+        });
+    } catch (e) {
+        console.error('Batch generate error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get job status
+app.get('/api/jobs/:jobId/status', authenticate, async (req, res) => {
+    const job = batchProcessor.getJobStatus(req.params.jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    res.json(job);
 });
 
 // ==========================================

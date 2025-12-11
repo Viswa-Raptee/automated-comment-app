@@ -96,7 +96,8 @@ async function notifyAllUsersForIntent(message, intent, accountId, postId) {
 }
 
 // --- SYNC LOGIC (Fetching Data for Master-Detail View) ---
-async function syncAccount(account) {
+async function syncAccount(account, options = {}) {
+    const { skipAiGeneration = false } = options;
     let newCount = 0;
 
     // 1. YOUTUBE SYNC
@@ -198,7 +199,14 @@ async function syncAccount(account) {
 
                             const exists = await Message.findOne({ where: { externalId } });
                             if (!exists) {
-                                const ai = await analyzeAndDraft(sn.textDisplay, 'youtube');
+                                let intent = null;
+                                let aiDraft = null;
+
+                                if (!skipAiGeneration) {
+                                    const ai = await analyzeAndDraft(sn.textDisplay, 'youtube');
+                                    intent = ai.intent;
+                                    aiDraft = ai.reply;
+                                }
 
                                 const newMsg = await Message.create({
                                     platform: 'youtube',
@@ -210,13 +218,15 @@ async function syncAccount(account) {
                                     authorName: sn.authorDisplayName,
                                     authorId: sn.authorChannelId?.value || '',
                                     content: sn.textDisplay,
-                                    intent: ai.intent,
-                                    aiDraft: ai.reply,
+                                    intent,
+                                    aiDraft,
                                     status: 'pending'
                                 });
 
-                                // Auto-notify for complaints/questions
-                                await notifyAllUsersForIntent(newMsg, ai.intent, account.id, videoId);
+                                // Auto-notify for complaints/questions (only if AI ran)
+                                if (intent) {
+                                    await notifyAllUsersForIntent(newMsg, intent, account.id, videoId);
+                                }
                                 newCount++;
                             }
                         }
@@ -277,7 +287,14 @@ async function syncAccount(account) {
                     for (const c of media.comments.data) {
                         const exists = await Message.findOne({ where: { externalId: c.id } });
                         if (!exists) {
-                            const ai = await analyzeAndDraft(c.text, 'instagram');
+                            let intent = null;
+                            let aiDraft = null;
+
+                            if (!skipAiGeneration) {
+                                const ai = await analyzeAndDraft(c.text, 'instagram');
+                                intent = ai.intent;
+                                aiDraft = ai.reply;
+                            }
 
                             const newMsg = await Message.create({
                                 platform: 'instagram',
@@ -288,13 +305,15 @@ async function syncAccount(account) {
                                 mediaUrl: mediaImage,
                                 authorName: c.username,
                                 content: c.text,
-                                intent: ai.intent,
-                                aiDraft: ai.reply,
+                                intent,
+                                aiDraft,
                                 status: 'pending'
                             });
 
-                            // Auto-notify for complaints/questions
-                            await notifyAllUsersForIntent(newMsg, ai.intent, account.id, media.id);
+                            // Auto-notify for complaints/questions (only if AI ran)
+                            if (intent) {
+                                await notifyAllUsersForIntent(newMsg, intent, account.id, media.id);
+                            }
                             newCount++;
                         }
                     }
