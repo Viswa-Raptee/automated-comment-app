@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api from '../api/api';
+import { toast } from 'react-hot-toast';
 
 const JobContext = createContext();
 
@@ -8,6 +9,13 @@ export const useJob = () => useContext(JobContext);
 export const JobProvider = ({ children }) => {
     const [activeJob, setActiveJob] = useState(null);
     // { jobId, accountName, total, processed, status }
+
+    // Global sync state
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [hasSyncedThisSession, setHasSyncedThisSession] = useState(() => {
+        // Check sessionStorage for previous sync in this session
+        return sessionStorage.getItem('hasSynced') === 'true';
+    });
 
     // Start tracking a job
     const startJob = (jobId, accountName, total) => {
@@ -18,6 +26,68 @@ export const JobProvider = ({ children }) => {
     const clearJob = () => {
         setActiveJob(null);
     };
+
+    // Check if sync should be disabled (syncing OR job running)
+    const isSyncDisabled = isSyncing || (activeJob && activeJob.status === 'running');
+
+    // Perform sync for all accounts
+    const performSync = useCallback(async (showToast = true) => {
+        if (isSyncing) return; // Prevent duplicate syncs
+
+        setIsSyncing(true);
+        try {
+            const { data } = await api.post('/sync-all');
+            if (showToast) {
+                toast.success(data.message || 'Sync complete');
+            }
+            // Mark as synced in sessionStorage
+            sessionStorage.setItem('hasSynced', 'true');
+            setHasSyncedThisSession(true);
+            return data;
+        } catch (e) {
+            if (showToast) {
+                toast.error('Sync failed');
+            }
+            throw e;
+        } finally {
+            setIsSyncing(false);
+        }
+    }, [isSyncing]);
+
+    // Perform sync for a specific account
+    const performAccountSync = useCallback(async (accountId, showToast = true) => {
+        if (isSyncing) return;
+
+        setIsSyncing(true);
+        try {
+            const { data } = await api.post(`/sync/${accountId}`);
+            if (showToast) {
+                toast.success('Synced successfully');
+            }
+            sessionStorage.setItem('hasSynced', 'true');
+            setHasSyncedThisSession(true);
+            return data;
+        } catch (e) {
+            if (showToast) {
+                toast.error('Sync failed');
+            }
+            throw e;
+        } finally {
+            setIsSyncing(false);
+        }
+    }, [isSyncing]);
+
+    // Auto-sync on first load (fresh session / hard refresh)
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (token && !hasSyncedThisSession) {
+            // Delay slightly to let components mount
+            const timer = setTimeout(() => {
+                performSync(false).catch(console.error);
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Poll for job status
     useEffect(() => {
@@ -44,7 +114,16 @@ export const JobProvider = ({ children }) => {
     }, [activeJob?.jobId, activeJob?.status]);
 
     return (
-        <JobContext.Provider value={{ activeJob, startJob, clearJob }}>
+        <JobContext.Provider value={{
+            activeJob,
+            startJob,
+            clearJob,
+            isSyncing,
+            isSyncDisabled,
+            hasSyncedThisSession,
+            performSync,
+            performAccountSync
+        }}>
             {children}
 
             {/* Floating Progress Indicator */}
@@ -68,10 +147,10 @@ export const JobProvider = ({ children }) => {
                         <div className="bg-gray-100 rounded-full h-1.5 overflow-hidden">
                             <div
                                 className={`h-1.5 transition-all duration-300 ${activeJob.status === 'complete'
-                                        ? 'bg-green-500'
-                                        : activeJob.status === 'failed'
-                                            ? 'bg-red-500'
-                                            : 'bg-indigo-600'
+                                    ? 'bg-green-500'
+                                    : activeJob.status === 'failed'
+                                        ? 'bg-red-500'
+                                        : 'bg-indigo-600'
                                     }`}
                                 style={{ width: `${activeJob.total ? (activeJob.processed / activeJob.total) * 100 : 0}%` }}
                             />
@@ -79,6 +158,16 @@ export const JobProvider = ({ children }) => {
                         <p className="text-xs text-gray-500 mt-1.5 text-right">
                             {activeJob.processed} / {activeJob.total}
                         </p>
+                    </div>
+                </div>
+            )}
+
+            {/* Syncing Indicator */}
+            {isSyncing && (
+                <div className="fixed bottom-4 left-4 z-50">
+                    <div className="bg-indigo-600 text-white rounded-xl shadow-lg px-4 py-3 flex items-center gap-3">
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm font-medium">Syncing accounts...</span>
                     </div>
                 </div>
             )}

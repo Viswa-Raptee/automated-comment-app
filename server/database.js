@@ -115,6 +115,21 @@ const Notification = sequelize.define('Notification', {
   isRead: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
 
+// --- 5. CHROMA CONFIG ---
+const ChromaConfig = sequelize.define('ChromaConfig', {
+  name: { type: DataTypes.STRING, allowNull: false },         // Display name
+  apiKey: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+    get() { return this.getDataValue('apiKey') ? decrypt(this.getDataValue('apiKey')) : ''; },
+    set(value) { this.setDataValue('apiKey', encrypt(value)); }
+  },
+  tenant: { type: DataTypes.STRING, allowNull: false },       // Chroma tenant
+  database: { type: DataTypes.STRING, allowNull: false },     // Chroma database
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: false }, // Only one can be active
+  activeCollection: { type: DataTypes.STRING }                // Currently active collection
+});
+
 // Relationships
 Account.hasMany(Post, { foreignKey: 'accountId' });
 Post.belongsTo(Account, { foreignKey: 'accountId' });
@@ -174,4 +189,4 @@ async function syncDatabase() {
 
 syncDatabase();
 
-module.exports = { sequelize, User, Account, Post, Message, Notification };
+module.exports = { sequelize, User, Account, Post, Message, Notification, ChromaConfig };

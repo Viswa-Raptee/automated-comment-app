@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { useAccounts } from '../context/AccountContext';
+import { useJob } from '../context/JobContext';
 import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import {
@@ -142,13 +143,13 @@ const InboxPage = () => {
   const { accountId } = useParams();
   const [searchParams] = useSearchParams();
   const { accounts, fetchAccounts } = useAccounts();
+  const { isSyncDisabled, isSyncing, performAccountSync } = useJob();
   const [selectedAccount, setSelectedAccount] = useState(null);
 
   const [posts, setPosts] = useState([]);
   const [currentPostIndex, setCurrentPostIndex] = useState(0);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [statusFilter, setStatusFilter] = useState('pending'); // 'all', 'pending', 'posted'
 
@@ -264,15 +265,11 @@ const InboxPage = () => {
   // Sync handler
   const handleSync = async () => {
     if (!selectedAccount) return;
-    setSyncing(true);
     try {
-      await api.post(`/sync/${selectedAccount.id}`);
-      toast.success("Synced!");
+      await performAccountSync(selectedAccount.id);
       await fetchPosts();
     } catch (e) {
-      toast.error("Sync failed");
-    } finally {
-      setSyncing(false);
+      // Error already handled in performAccountSync
     }
   };
 
@@ -328,11 +325,11 @@ const InboxPage = () => {
           </div>
           <button
             onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+            disabled={isSyncDisabled}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing...' : 'Sync'}
+            <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
+            {isSyncing ? 'Syncing...' : 'Sync'}
           </button>
         </header>
         <div className="flex-1 flex items-center justify-center">
@@ -398,11 +395,11 @@ const InboxPage = () => {
           <NotificationDropdown />
           <button
             onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+            disabled={isSyncDisabled}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing...' : 'Sync'}
+            <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
+            {isSyncing ? 'Syncing...' : 'Sync'}
           </button>
         </div>
       </header>

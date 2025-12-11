@@ -14,6 +14,7 @@ import AccountSettingsPage from './pages/AccountSettingsPage';
 import UserManagementPage from './pages/UserManagementPage';
 import AuditPage from './pages/AuditPage';
 import ManageAccountsPage from './pages/ManageAccountsPage';
+import ManageDatabasePage from './pages/ManageDatabasePage';
 import LoginPage from './pages/LoginPage';
 
 const App = () => {
@@ -60,6 +61,7 @@ const App = () => {
                             <Route path="/users" element={<UserManagementPage />} />
                             <Route path="/audit" element={<AuditPage />} />
                             <Route path="/manage-accounts" element={<ManageAccountsPage />} />
+                            <Route path="/manage-database" element={<ManageDatabasePage />} />
 
                             {/* Legacy route redirect */}
                             <Route path="/my-approvals" element={<MyApprovalsPage />} />

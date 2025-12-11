@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAccounts } from '../context/AccountContext';
+import { useJob } from '../context/JobContext';
 import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import {
@@ -47,8 +48,8 @@ const VideoCard = ({ post, platform, onClick }) => {
 
                 {/* Platform Icon */}
                 <div className="absolute top-3 left-3 bg-white/90 backdrop-blur p-1.5 rounded-lg shadow-sm border border-gray-100">
-                    {platform === 'youtube' ? 
-                        <Youtube size={14} className="text-red-600" /> : 
+                    {platform === 'youtube' ?
+                        <Youtube size={14} className="text-red-600" /> :
                         <Instagram size={14} className="text-pink-600" />
                     }
                 </div>
@@ -78,7 +79,7 @@ const VideoCard = ({ post, platform, onClick }) => {
                         <BarChart3 size={14} className="text-gray-400" />
                         <span className="text-xs font-medium text-gray-600">Performance</span>
                     </div>
-                    
+
                     {post.pendingCount > 0 ? (
                         <span className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md">
                             Review Now <ArrowRightIcon />
@@ -107,7 +108,7 @@ const StatItem = ({ icon: Icon, value, label }) => (
 
 const ArrowRightIcon = () => (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 12h14M12 5l7 7-7 7"/>
+        <path d="M5 12h14M12 5l7 7-7 7" />
     </svg>
 );
 
@@ -116,10 +117,10 @@ const AccountPreviewPage = () => {
     const { accountId } = useParams();
     const navigate = useNavigate();
     const { accounts, fetchAccounts } = useAccounts();
+    const { isSyncDisabled, isSyncing, performAccountSync } = useJob();
     const [selectedAccount, setSelectedAccount] = useState(null);
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
 
     useEffect(() => { fetchAccounts(); }, []);
 
@@ -147,15 +148,11 @@ const AccountPreviewPage = () => {
 
     const handleSync = async () => {
         if (!selectedAccount) return;
-        setSyncing(true);
         try {
-            await api.post(`/sync/${selectedAccount.id}`);
-            toast.success("Synced successfully");
+            await performAccountSync(selectedAccount.id);
             await fetchPosts();
         } catch (e) {
-            toast.error("Sync failed");
-        } finally {
-            setSyncing(false);
+            // Error already handled in performAccountSync
         }
     };
 
@@ -176,11 +173,10 @@ const AccountPreviewPage = () => {
             <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
                 <div className="px-8 py-5 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shadow-sm ${
-                            selectedAccount.platform === 'instagram' ? 'bg-pink-50 border-pink-100' : 'bg-red-50 border-red-100'
-                        }`}>
-                            {selectedAccount.platform === 'youtube' ? 
-                                <Youtube size={24} className="text-red-600" /> : 
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shadow-sm ${selectedAccount.platform === 'instagram' ? 'bg-pink-50 border-pink-100' : 'bg-red-50 border-red-100'
+                            }`}>
+                            {selectedAccount.platform === 'youtube' ?
+                                <Youtube size={24} className="text-red-600" /> :
                                 <Instagram size={24} className="text-pink-600" />
                             }
                         </div>
@@ -198,11 +194,11 @@ const AccountPreviewPage = () => {
                         <NotificationDropdown />
                         <button
                             onClick={handleSync}
-                            disabled={syncing}
+                            disabled={isSyncDisabled}
                             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
                         >
-                            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-                            {syncing ? 'Syncing...' : 'Sync Data'}
+                            <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
+                            {isSyncing ? 'Syncing...' : 'Sync Data'}
                         </button>
                     </div>
                 </div>

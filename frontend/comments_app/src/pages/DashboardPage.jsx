@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useMessages } from '../context/MessageContext';
 import { useAuth } from '../context/AuthContext';
+import { useJob } from '../context/JobContext';
 import api from '../api/api';
 import { toast } from 'react-hot-toast';
 import {
@@ -215,8 +216,8 @@ const DashboardPage = () => {
         getWordCloud
     } = useMessages();
     const { user } = useAuth();
+    const { isSyncDisabled, isSyncing, performSync } = useJob();
 
-    const [syncing, setSyncing] = useState(false);
     const [filters, setFilters] = useState({
         accountId: '',
         postId: '',
@@ -247,18 +248,14 @@ const DashboardPage = () => {
         dateRange: filters.dateRange
     }), [getWordCloud, filters]);
 
-    // Manual sync - fetches new messages only
+    // Manual sync - uses centralized sync from JobContext
     const handleManualSync = async () => {
-        setSyncing(true);
         try {
-            const { data } = await api.post('/sync-all');
-            toast.success(data.message || 'Sync complete');
+            await performSync();
             // Refresh all data after sync
             await refresh();
         } catch (e) {
-            toast.error('Sync failed');
-        } finally {
-            setSyncing(false);
+            // Error already handled in performSync
         }
     };
 
@@ -287,11 +284,11 @@ const DashboardPage = () => {
                     {/* Sync Button */}
                     <button
                         onClick={handleManualSync}
-                        disabled={syncing}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+                        disabled={isSyncDisabled}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-                        {syncing ? 'Syncing...' : 'Sync All'}
+                        <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
+                        {isSyncing ? 'Syncing...' : 'Sync All'}
                     </button>
                 </div>
             </header>

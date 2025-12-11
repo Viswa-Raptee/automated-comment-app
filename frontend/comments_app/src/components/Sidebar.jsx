@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Instagram, Youtube, LogOut, FileText, PlusCircle, User,
   Shield, Users, Settings, MessageSquare, LayoutDashboard,
-  ChevronRight, Layers
+  ChevronRight, Layers, Database
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAccounts } from '../context/AccountContext';
@@ -131,6 +131,10 @@ const Sidebar = () => {
               <Link to="/manage-accounts" className={menuItemClass(isActive('/manage-accounts'))}>
                 <PlusCircle size={18} />
                 <span>Manage Accounts</span>
+              </Link>
+              <Link to="/manage-database" className={menuItemClass(isActive('/manage-database'))}>
+                <Database size={18} />
+                <span>Manage Database</span>
               </Link>
               <Link to="/users" className={menuItemClass(isActive('/users'))}>
                 <Users size={18} />

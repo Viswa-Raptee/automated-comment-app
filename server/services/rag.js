@@ -5,18 +5,45 @@ require('dotenv').config();
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 
-const CHROMA_TENANT = process.env.CHROMA_TENANT;
-const CHROMA_DATABASE = process.env.CHROMA_DATABASE;
-const CHROMA_COLLECTION_NAME =
-  process.env.CHROMA_COLLECTION || 'raptee_t30_faq_light';
+// Default env-based config (fallback)
+const DEFAULT_CHROMA_CONFIG = {
+  apiKey: process.env.CHROMA_API_KEY,
+  tenant: process.env.CHROMA_TENANT,
+  database: process.env.CHROMA_DATABASE,
+  collection: process.env.CHROMA_COLLECTION || 'raptee_t30_faq_light'
+};
 
 const mistral = new Mistral({ apiKey: MISTRAL_API_KEY });
 
-const chroma = new CloudClient({
-  apiKey: process.env.CHROMA_API_KEY,
-  tenant: CHROMA_TENANT,
-  database: CHROMA_DATABASE,
-});
+// ---------- GET ACTIVE CHROMA CONFIG ----------
+async function getActiveChromaConfig() {
+  try {
+    const { ChromaConfig } = require('../database');
+    const activeConfig = await ChromaConfig.findOne({ where: { isActive: true } });
+
+    if (activeConfig && activeConfig.activeCollection) {
+      return {
+        apiKey: activeConfig.apiKey,
+        tenant: activeConfig.tenant,
+        database: activeConfig.database,
+        collection: activeConfig.activeCollection
+      };
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not load active Chroma config, using defaults:', e.message);
+  }
+
+  return DEFAULT_CHROMA_CONFIG;
+}
+
+// ---------- CREATE CHROMA CLIENT ----------
+function createChromaClient(config) {
+  return new CloudClient({
+    apiKey: config.apiKey,
+    tenant: config.tenant,
+    database: config.database,
+  });
+}
 
 // ---------- RETRY HELPER FOR RATE LIMITS ----------
 async function retryWithBackoff(fn, maxRetries = 3, baseDelayMs = 2000) {
@@ -59,16 +86,21 @@ async function getEmbeddings(texts) {
 // ---------- CHROMA COLLECTION ----------
 async function getCollection() {
   try {
+    const config = await getActiveChromaConfig();
+    const chroma = createChromaClient(config);
+
     // No embeddingFunction needed because we pass vectors manually
     return await chroma.getOrCreateCollection({
-      name: CHROMA_COLLECTION_NAME,
+      name: config.collection,
       metadata: { 'hnsw:space': 'cosine' },
     });
   } catch (error) {
     console.error('❌ Chroma Connection Error:', error.message);
     try {
+      const config = await getActiveChromaConfig();
+      const chroma = createChromaClient(config);
       return await chroma.getCollection({
-        name: CHROMA_COLLECTION_NAME,
+        name: config.collection,
       });
     } catch (e) {
       console.error('❌ Could not retrieve collection:', e.message);

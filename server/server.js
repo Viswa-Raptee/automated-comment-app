@@ -833,6 +833,184 @@ app.delete('/api/notifications/clear-all', authenticate, async (req, res) => {
     }
 });
 
+// ==========================================
+// 10. CHROMA DATABASE MANAGEMENT (Admin)
+// ==========================================
+
+const chromaManager = require('./services/chromaManager');
+const { ChromaConfig } = require('./database');
+
+// Get all saved Chroma configs
+app.get('/api/admin/chroma/configs', authenticate, isAdmin, async (req, res) => {
+    try {
+        const configs = await ChromaConfig.findAll({
+            attributes: ['id', 'name', 'tenant', 'database', 'isActive', 'activeCollection', 'createdAt']
+        });
+        res.json(configs);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add new Chroma config
+app.post('/api/admin/chroma/configs', authenticate, isAdmin, async (req, res) => {
+    try {
+        const { name, apiKey, tenant, database } = req.body;
+
+        // Test connection first
+        const testResult = await chromaManager.testConnection({ apiKey, tenant, database });
+        if (!testResult.success) {
+            return res.status(400).json({ error: `Connection failed: ${testResult.error}` });
+        }
+
+        const config = await ChromaConfig.create({ name, apiKey, tenant, database });
+        res.json({
+            success: true,
+            id: config.id,
+            message: 'Database configuration saved successfully'
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete Chroma config
+app.delete('/api/admin/chroma/configs/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.id);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        await config.destroy();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get collections for a config
+app.get('/api/admin/chroma/collections/:configId', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        const collections = await chromaManager.listCollections(config);
+        res.json(collections);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Create collection
+app.post('/api/admin/chroma/collections/:configId', authenticate, isAdmin, async (req, res) => {
+    try {
+        const { name } = req.body;
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        await chromaManager.createCollection(config, name);
+        res.json({ success: true, message: `Collection '${name}' created` });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete collection
+app.delete('/api/admin/chroma/collections/:configId/:name', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        await chromaManager.deleteCollection(config, req.params.name);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get documents in collection
+app.get('/api/admin/chroma/documents/:configId/:collection', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        const documents = await chromaManager.getDocuments(config, req.params.collection);
+        res.json(documents);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add document
+app.post('/api/admin/chroma/documents/:configId/:collection', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        const doc = await chromaManager.addDocument(config, req.params.collection, req.body);
+        res.json({ success: true, document: doc });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update document
+app.put('/api/admin/chroma/documents/:configId/:collection/:docId', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        const doc = await chromaManager.updateDocument(config, req.params.collection, req.params.docId, req.body);
+        res.json({ success: true, document: doc });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete document
+app.delete('/api/admin/chroma/documents/:configId/:collection/:docId', authenticate, isAdmin, async (req, res) => {
+    try {
+        const config = await ChromaConfig.findByPk(req.params.configId);
+        if (!config) return res.status(404).json({ error: 'Config not found' });
+
+        await chromaManager.deleteDocument(config, req.params.collection, req.params.docId);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Activate config and collection
+app.post('/api/admin/chroma/activate/:configId/:collection', authenticate, isAdmin, async (req, res) => {
+    try {
+        await chromaManager.setActiveConfig(req.params.configId, req.params.collection);
+        res.json({ success: true, message: 'Database and collection activated' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get active config
+app.get('/api/admin/chroma/active', authenticate, async (req, res) => {
+    try {
+        const config = await chromaManager.getActiveConfig();
+        if (!config) {
+            return res.json({ active: false, config: null });
+        }
+        res.json({
+            active: true,
+            config: {
+                id: config.id,
+                name: config.name,
+                tenant: config.tenant,
+                database: config.database,
+                activeCollection: config.activeCollection
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Start
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
