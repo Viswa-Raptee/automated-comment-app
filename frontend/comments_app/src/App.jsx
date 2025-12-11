@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { AccountProvider } from './context/AccountContext';
 import { MessageProvider } from './context/MessageContext';
+import { JobProvider } from './context/JobContext';
 import ProtectedRoute from './ProtectedRoute';
 import Sidebar from './components/Sidebar';
 import DashboardPage from './pages/DashboardPage';
@@ -21,54 +22,56 @@ const App = () => {
       <AuthProvider>
         <AccountProvider>
           <MessageProvider>
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 3000,
-                style: {
-                  borderRadius: '12px',
-                  background: '#1f2937',
-                  color: '#fff',
-                },
-              }}
-            />
-            <div className="flex h-screen bg-gray-100 font-sans">
-              <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/*" element={
-                  <ProtectedRoute>
-                    <div className="flex h-full w-full">
-                      <Sidebar />
-                      <div className="flex-1 overflow-hidden">
-                        <Routes>
-                          {/* Dashboard - Landing Page */}
-                          <Route path="/" element={<DashboardPage />} />
+            <JobProvider>
+              <Toaster
+                position="top-right"
+                toastOptions={{
+                  duration: 3000,
+                  style: {
+                    borderRadius: '12px',
+                    background: '#1f2937',
+                    color: '#fff',
+                  },
+                }}
+              />
+              <div className="flex h-screen bg-gray-100 font-sans">
+                <Routes>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/*" element={
+                    <ProtectedRoute>
+                      <div className="flex h-full w-full">
+                        <Sidebar />
+                        <div className="flex-1 overflow-hidden">
+                          <Routes>
+                            {/* Dashboard - Landing Page */}
+                            <Route path="/" element={<DashboardPage />} />
 
-                          {/* Account Preview - Shows all videos */}
-                          <Route path="/account/:accountId" element={<AccountPreviewPage />} />
+                            {/* Account Preview - Shows all videos */}
+                            <Route path="/account/:accountId" element={<AccountPreviewPage />} />
 
-                          {/* Account Inbox - View comments for specific post */}
-                          <Route path="/account/:accountId/inbox" element={<InboxPage />} />
+                            {/* Account Inbox - View comments for specific post */}
+                            <Route path="/account/:accountId/inbox" element={<InboxPage />} />
 
-                          {/* User Menu */}
-                          <Route path="/my-comments" element={<MyApprovalsPage />} />
-                          <Route path="/settings" element={<AccountSettingsPage />} />
+                            {/* User Menu */}
+                            <Route path="/my-comments" element={<MyApprovalsPage />} />
+                            <Route path="/settings" element={<AccountSettingsPage />} />
 
-                          {/* Admin Routes */}
-                          <Route path="/users" element={<UserManagementPage />} />
-                          <Route path="/audit" element={<AuditPage />} />
-                          <Route path="/manage-accounts" element={<ManageAccountsPage />} />
+                            {/* Admin Routes */}
+                            <Route path="/users" element={<UserManagementPage />} />
+                            <Route path="/audit" element={<AuditPage />} />
+                            <Route path="/manage-accounts" element={<ManageAccountsPage />} />
 
-                          {/* Legacy route redirect */}
-                          <Route path="/my-approvals" element={<MyApprovalsPage />} />
-                          <Route path="/add-account" element={<ManageAccountsPage />} />
-                        </Routes>
+                            {/* Legacy route redirect */}
+                            <Route path="/my-approvals" element={<MyApprovalsPage />} />
+                            <Route path="/add-account" element={<ManageAccountsPage />} />
+                          </Routes>
+                        </div>
                       </div>
-                    </div>
-                  </ProtectedRoute>
-                } />
-              </Routes>
-            </div>
+                    </ProtectedRoute>
+                  } />
+                </Routes>
+              </div>
+            </JobProvider>
           </MessageProvider>
         </AccountProvider>
       </AuthProvider>

@@ -177,9 +177,15 @@ const InboxPage = () => {
       const { data } = await api.get(`/posts-summary?accountId=${selectedAccount.id}`);
       setPosts(data);
 
-      // Set initial post index from URL param
+      // Set initial post from URL param - support both postIndex and postId
       const postIndexParam = searchParams.get('postIndex');
-      if (postIndexParam) {
+      const postIdParam = searchParams.get('postId');
+
+      if (postIdParam) {
+        // Find post by postId (from notification navigation)
+        const postIdx = data.findIndex(p => p.postId === postIdParam);
+        setCurrentPostIndex(postIdx >= 0 ? postIdx : 0);
+      } else if (postIndexParam) {
         const idx = parseInt(postIndexParam);
         if (!isNaN(idx) && idx >= 0 && idx < data.length) {
           setCurrentPostIndex(idx);
@@ -443,8 +449,8 @@ const InboxPage = () => {
                     key={f}
                     onClick={() => setStatusFilter(f)}
                     className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all capitalize ${statusFilter === f
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
                       }`}
                   >
                     {f}

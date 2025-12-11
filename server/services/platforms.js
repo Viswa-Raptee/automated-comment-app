@@ -331,5 +331,6 @@ module.exports = {
     postInstagramReply,
     postYouTubeReply,
     syncAccount,
-    loadClientSecrets
+    loadClientSecrets,
+    notifyAllUsersForIntent
 };

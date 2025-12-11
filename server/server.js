@@ -10,7 +10,7 @@ require('dotenv').config();
 // --- IMPORTS ---
 const { sequelize, User, Account, Post, Message, Notification } = require('./database');
 const { authenticate, isAdmin } = require('./middleware/auth');
-const { syncAccount, postInstagramReply, postYouTubeReply, loadClientSecrets } = require('./services/platforms');
+const { syncAccount, postInstagramReply, postYouTubeReply, loadClientSecrets, notifyAllUsersForIntent } = require('./services/platforms');
 
 const app = express();
 app.use(cors());
@@ -188,11 +188,22 @@ app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
         const newCount = await syncAccount(account, { skipAiGeneration: true });
 
         // Get summary stats
-        const [videoCount, totalComments, unrepliedCount] = await Promise.all([
+        const [videoCount, totalComments, withoutDraft, approvedCount] = await Promise.all([
             Post.count({ where: { accountId: account.id } }),
             Message.count({ where: { accountId: account.id } }),
-            Message.count({ where: { accountId: account.id, status: 'pending' } })
+            Message.count({ where: { accountId: account.id, aiDraft: null } }),
+            Message.count({ where: { accountId: account.id, status: 'posted' } })
         ]);
+
+        // Get post date range
+        const posts = await Post.findAll({
+            where: { accountId: account.id },
+            attributes: ['publishedAt'],
+            order: [['publishedAt', 'ASC']]
+        });
+
+        const earliestPost = posts[0]?.publishedAt;
+        const latestPost = posts[posts.length - 1]?.publishedAt;
 
         res.json({
             success: true,
@@ -204,8 +215,11 @@ app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
             summary: {
                 videos: videoCount,
                 totalComments,
-                unrepliedComments: unrepliedCount,
-                newComments: newCount
+                unrepliedComments: withoutDraft,
+                approvedComments: approvedCount,
+                newComments: newCount,
+                earliestPost,
+                latestPost
             }
         });
     } catch (e) {
@@ -214,18 +228,36 @@ app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
     }
 });
 
-// Batch generate replies for past comments
+// Batch generate replies for past comments (with optional date range)
 app.post('/api/accounts/:id/batch-generate', authenticate, async (req, res) => {
     try {
         const account = await Account.findByPk(req.params.id);
         if (!account) return res.status(404).json({ error: 'Account not found' });
 
-        // Get all pending comments without AI drafts
+        const { startDate, endDate } = req.body;
+
+        // Get posts within date range (if specified)
+        let postIds = null;
+        if (startDate || endDate) {
+            const postWhere = { accountId: account.id };
+            if (startDate) postWhere.publishedAt = { ...(postWhere.publishedAt || {}), [require('sequelize').Op.gte]: new Date(startDate) };
+            if (endDate) postWhere.publishedAt = { ...(postWhere.publishedAt || {}), [require('sequelize').Op.lte]: new Date(endDate) };
+
+            const posts = await Post.findAll({ where: postWhere, attributes: ['postId'] });
+            postIds = posts.map(p => p.postId);
+        }
+
+        // Get all comments without AI drafts (optionally filtered by post date)
+        const messageWhere = {
+            accountId: account.id,
+            aiDraft: null
+        };
+        if (postIds !== null) {
+            messageWhere.postId = { [require('sequelize').Op.in]: postIds };
+        }
+
         const pendingComments = await Message.findAll({
-            where: {
-                accountId: account.id,
-                status: 'pending'
-            },
+            where: messageWhere,
             order: [['createdAt', 'ASC']]
         });
 
@@ -238,20 +270,21 @@ app.post('/api/accounts/:id/batch-generate', authenticate, async (req, res) => {
 
         // Start batch processing asynchronously (don't await)
         batchProcessor.processBatch(jobId, pendingComments, async (comment) => {
-            // Only generate if no draft exists
-            if (!comment.aiDraft) {
-                const result = await analyzeAndDraft(comment.content, comment.platform || 'youtube');
-                await comment.update({
-                    intent: result.intent,
-                    aiDraft: result.reply
-                });
-            }
+            const result = await analyzeAndDraft(comment.content, comment.platform || 'youtube');
+            await comment.update({
+                intent: result.intent,
+                aiDraft: result.reply
+            });
+
+            // Send notification for complaints and questions
+            await notifyAllUsersForIntent(comment, result.intent, account.id, comment.postId);
         });
 
         res.json({
             success: true,
             jobId,
             total: pendingComments.length,
+            accountName: account.name,
             message: 'Batch processing started'
         });
     } catch (e) {

@@ -1,24 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
 import api from '../api/api';
-import { Instagram, Youtube, Loader2, CheckCircle, AlertCircle, Video, MessageSquare, Clock } from 'lucide-react';
+import { useJob } from '../context/JobContext';
+import { Instagram, Youtube, Loader2, CheckCircle, Video, MessageSquare, Clock, Calendar } from 'lucide-react';
 
-// ============ MAIN PAGE ============
 const ManageAccountsPage = () => {
   const [form, setForm] = useState({ name: '', platform: 'instagram', identifier: '', accessToken: '' });
   const [accounts, setAccounts] = useState([]);
   const [busyId, setBusyId] = useState(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { startJob } = useJob();
 
   // Onboarding state
   const [onboardingAccount, setOnboardingAccount] = useState(null);
-  const [onboardingStep, setOnboardingStep] = useState('idle'); // idle, connecting, summary, processing, complete
+  const [onboardingStep, setOnboardingStep] = useState('idle');
   const [summary, setSummary] = useState(null);
-  const [jobId, setJobId] = useState(null);
-  const [progress, setProgress] = useState({ processed: 0, total: 0 });
+
+  // Date range for generation
+  const [dateRange, setDateRange] = useState({ startDate: '', endDate: '' });
+
+  // Delete modal state
+  const [deleteModal, setDeleteModal] = useState({ open: false, account: null });
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const fetchAccounts = async () => {
     try {
@@ -35,53 +41,11 @@ const ManageAccountsPage = () => {
     const status = searchParams.get('status');
 
     if (status === 'success' && accountId) {
-      // Start onboarding for the newly connected account
       startOnboarding(parseInt(accountId));
-      // Clean URL
       window.history.replaceState({}, '', '/manage-accounts');
     }
   }, [searchParams]);
 
-  // Tab close warning during processing
-  useEffect(() => {
-    if (onboardingStep === 'processing') {
-      const handler = (e) => {
-        e.preventDefault();
-        e.returnValue = 'Processing is in progress. Are you sure you want to leave?';
-        return e.returnValue;
-      };
-      window.addEventListener('beforeunload', handler);
-      return () => window.removeEventListener('beforeunload', handler);
-    }
-  }, [onboardingStep]);
-
-  // Polling for job status
-  useEffect(() => {
-    if (!jobId || onboardingStep !== 'processing') return;
-
-    const interval = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/jobs/${jobId}/status`);
-        setProgress({ processed: data.processed, total: data.total });
-
-        if (data.status === 'complete') {
-          clearInterval(interval);
-          setOnboardingStep('complete');
-          toast.success('All replies generated!');
-        } else if (data.status === 'failed') {
-          clearInterval(interval);
-          setOnboardingStep('complete');
-          toast.error('Processing failed: ' + data.error);
-        }
-      } catch (e) {
-        console.error('Polling error:', e);
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [jobId, onboardingStep]);
-
-  // Start onboarding for an account
   const startOnboarding = async (accountId) => {
     setOnboardingStep('connecting');
     setOnboardingAccount(accountId);
@@ -89,30 +53,33 @@ const ManageAccountsPage = () => {
     try {
       const { data } = await api.post(`/accounts/${accountId}/onboard`);
       setSummary(data);
+      // Set default date range from earliest to latest post
+      if (data.summary.earliestPost || data.summary.latestPost) {
+        setDateRange({
+          startDate: data.summary.earliestPost?.split('T')[0] || '',
+          endDate: data.summary.latestPost?.split('T')[0] || ''
+        });
+      }
       setOnboardingStep('summary');
       fetchAccounts();
     } catch (e) {
       toast.error('Failed to connect: ' + (e.response?.data?.error || e.message));
       setOnboardingStep('idle');
-      setOnboardingAccount(null);
     }
   };
 
-  // Handle Instagram form submit
   const handleSave = async (e) => {
     e.preventDefault();
     try {
       const { data } = await api.post('/accounts', form);
       toast.success("Account connected!");
       setForm({ name: '', platform: 'instagram', identifier: '', accessToken: '' });
-      // Start onboarding
       startOnboarding(data.id);
     } catch {
       toast.error("Failed to connect");
     }
   };
 
-  // Handle YouTube OAuth
   const handleGoogleLogin = async () => {
     try {
       toast.loading("Starting YouTube OAuth...");
@@ -127,27 +94,32 @@ const ManageAccountsPage = () => {
     }
   };
 
-  // Start batch generation
   const handleGenerateAll = async () => {
     if (!onboardingAccount) return;
-    setOnboardingStep('processing');
 
     try {
-      const { data } = await api.post(`/accounts/${onboardingAccount}/batch-generate`);
+      const { data } = await api.post(`/accounts/${onboardingAccount}/batch-generate`, {
+        startDate: dateRange.startDate || undefined,
+        endDate: dateRange.endDate || undefined
+      });
+
       if (data.jobId) {
-        setJobId(data.jobId);
-        setProgress({ processed: 0, total: data.total });
+        // Use global job context - closes modal and shows floating progress
+        startJob(data.jobId, data.accountName, data.total);
+        toast.success(`Generating ${data.total} replies in background`);
       } else {
-        // No comments to process
-        setOnboardingStep('complete');
+        toast.success('No comments to process');
       }
+
+      // Close onboarding modal - progress continues in background
+      setOnboardingStep('idle');
+      setOnboardingAccount(null);
+      setSummary(null);
     } catch (e) {
       toast.error('Failed to start: ' + e.message);
-      setOnboardingStep('summary');
     }
   };
 
-  // Skip batch generation
   const handleSkip = () => {
     setOnboardingStep('idle');
     setOnboardingAccount(null);
@@ -155,13 +127,35 @@ const ManageAccountsPage = () => {
     toast.success('Setup complete! Comments will be processed as they come in.');
   };
 
-  // Close onboarding
-  const handleClose = () => {
-    setOnboardingStep('idle');
-    setOnboardingAccount(null);
-    setSummary(null);
-    setJobId(null);
-    setProgress({ processed: 0, total: 0 });
+  // Delete functions
+  const openDeleteModal = (account) => {
+    setDeleteModal({ open: true, account });
+    setDeleteConfirmText('');
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteModal({ open: false, account: null });
+    setDeleteConfirmText('');
+  };
+
+  const expectedDeleteText = deleteModal.account ? `${deleteModal.account.name}-delete` : '';
+
+  const deleteAccount = async (deleteData = true) => {
+    if (!deleteModal.account) return;
+    if (deleteConfirmText !== expectedDeleteText) {
+      toast.error('Please type the confirmation text correctly');
+      return;
+    }
+
+    setBusyId(deleteModal.account.id);
+    closeDeleteModal();
+
+    try {
+      await api.delete(`/accounts/${deleteModal.account.id}?deleteData=${deleteData}`);
+      toast.success(deleteData ? 'Account and data deleted' : 'Account disconnected');
+      setAccounts(prev => prev.filter(a => a.id !== deleteModal.account.id));
+    } catch { toast.error('Delete failed'); }
+    finally { setBusyId(null); }
   };
 
   const updateAccount = async (id, updates) => {
@@ -174,65 +168,43 @@ const ManageAccountsPage = () => {
     finally { setBusyId(null); }
   };
 
-  // Delete modal state
-  const [deleteModal, setDeleteModal] = useState({ open: false, accountId: null, accountName: '' });
-
-  const openDeleteModal = (account) => {
-    setDeleteModal({ open: true, accountId: account.id, accountName: account.name });
-  };
-
-  const closeDeleteModal = () => {
-    setDeleteModal({ open: false, accountId: null, accountName: '' });
-  };
-
-  const deleteAccount = async (deleteData = true) => {
-    if (!deleteModal.accountId) return;
-    setBusyId(deleteModal.accountId);
-    closeDeleteModal();
-
-    try {
-      await api.delete(`/accounts/${deleteModal.accountId}?deleteData=${deleteData}`);
-      toast.success(deleteData ? 'Account and data deleted' : 'Account disconnected (data kept)');
-      setAccounts(prev => prev.filter(a => a.id !== deleteModal.accountId));
-    } catch { toast.error('Delete failed'); }
-    finally { setBusyId(null); }
-  };
-
-  // ============ RENDER ============
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Connect Channel</h1>
 
-      {/* Delete Options Modal */}
+      {/* Delete Confirmation Modal */}
       {deleteModal.open && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Account</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              How would you like to delete <strong>{deleteModal.accountName}</strong>?
+            <p className="text-sm text-gray-600 mb-4">
+              To delete <strong>{deleteModal.account?.name}</strong>, type:
             </p>
-            <div className="space-y-3">
-              <button
-                onClick={() => deleteAccount(false)}
-                className="w-full p-3 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition-colors"
-              >
-                <p className="font-medium text-gray-900">Disconnect Only</p>
-                <p className="text-xs text-gray-500">Remove account connection but keep all data for analytics</p>
-              </button>
+            <div className="bg-gray-100 rounded-lg px-3 py-2 mb-4 font-mono text-sm text-gray-700">
+              {expectedDeleteText}
+            </div>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="Type to confirm"
+              className="w-full p-3 border rounded-lg text-sm mb-4"
+            />
+            <div className="flex gap-3">
               <button
                 onClick={() => deleteAccount(true)}
-                className="w-full p-3 rounded-lg border border-red-200 bg-red-50 text-left hover:bg-red-100 transition-colors"
+                disabled={deleteConfirmText !== expectedDeleteText}
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <p className="font-medium text-red-700">Delete Everything</p>
-                <p className="text-xs text-red-600">Remove account and all related comments, posts, notifications</p>
+                Delete Everything
+              </button>
+              <button
+                onClick={closeDeleteModal}
+                className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+              >
+                Cancel
               </button>
             </div>
-            <button
-              onClick={closeDeleteModal}
-              className="w-full mt-4 py-2 text-sm text-gray-500 hover:text-gray-700"
-            >
-              Cancel
-            </button>
           </div>
         </div>
       )}
@@ -242,7 +214,6 @@ const ManageAccountsPage = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
 
-            {/* Connecting */}
             {onboardingStep === 'connecting' && (
               <div className="text-center py-8">
                 <Loader2 className="w-12 h-12 mx-auto text-indigo-600 animate-spin mb-4" />
@@ -251,7 +222,6 @@ const ManageAccountsPage = () => {
               </div>
             )}
 
-            {/* Summary */}
             {onboardingStep === 'summary' && summary && (
               <div>
                 <div className="flex items-center gap-3 mb-6">
@@ -271,97 +241,71 @@ const ManageAccountsPage = () => {
                   <CheckCircle className="w-5 h-5 text-green-500 ml-auto" />
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                  <div className="bg-gray-50 rounded-lg p-4 text-center">
-                    <Video className="w-5 h-5 mx-auto text-gray-400 mb-1" />
-                    <p className="text-2xl font-bold text-gray-900">{summary.summary.videos}</p>
+                <div className="grid grid-cols-3 gap-3 mb-6">
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <Video className="w-4 h-4 mx-auto text-gray-400 mb-1" />
+                    <p className="text-xl font-bold text-gray-900">{summary.summary.videos}</p>
                     <p className="text-xs text-gray-500">Videos</p>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-4 text-center">
-                    <MessageSquare className="w-5 h-5 mx-auto text-gray-400 mb-1" />
-                    <p className="text-2xl font-bold text-gray-900">{summary.summary.totalComments}</p>
-                    <p className="text-xs text-gray-500">Comments</p>
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <MessageSquare className="w-4 h-4 mx-auto text-gray-400 mb-1" />
+                    <p className="text-xl font-bold text-gray-900">{summary.summary.totalComments}</p>
+                    <p className="text-xs text-gray-500">Total</p>
                   </div>
-                  <div className="bg-amber-50 rounded-lg p-4 text-center">
-                    <Clock className="w-5 h-5 mx-auto text-amber-500 mb-1" />
-                    <p className="text-2xl font-bold text-amber-600">{summary.summary.unrepliedComments}</p>
+                  <div className="bg-amber-50 rounded-lg p-3 text-center">
+                    <Clock className="w-4 h-4 mx-auto text-amber-500 mb-1" />
+                    <p className="text-xl font-bold text-amber-600">{summary.summary.unrepliedComments}</p>
                     <p className="text-xs text-gray-500">Unreplied</p>
                   </div>
                 </div>
 
-                {summary.summary.unrepliedComments > 0 ? (
+                {summary.summary.unrepliedComments > 0 && (
                   <>
-                    <p className="text-sm text-gray-600 mb-4">
-                      You have {summary.summary.unrepliedComments} unreplied comments. Would you like to generate AI replies for them?
-                    </p>
+                    <div className="mb-4">
+                      <label className="block text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
+                        <Calendar className="w-3 h-3" /> Generate for videos posted between:
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <input
+                          type="date"
+                          value={dateRange.startDate}
+                          onChange={(e) => setDateRange(d => ({ ...d, startDate: e.target.value }))}
+                          className="p-2 border rounded-lg text-sm"
+                        />
+                        <input
+                          type="date"
+                          value={dateRange.endDate}
+                          onChange={(e) => setDateRange(d => ({ ...d, endDate: e.target.value }))}
+                          className="p-2 border rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+
                     <div className="flex gap-3">
                       <button
                         onClick={handleGenerateAll}
                         className="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
                       >
-                        Generate All Replies
+                        Generate Replies
                       </button>
                       <button
                         onClick={handleSkip}
                         className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                       >
-                        Skip for Now
+                        Skip
                       </button>
                     </div>
                   </>
-                ) : (
-                  <>
-                    <p className="text-sm text-gray-600 mb-4">
-                      All caught up! No unreplied comments to process.
-                    </p>
-                    <button
-                      onClick={handleClose}
-                      className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-                    >
-                      Done
-                    </button>
-                  </>
                 )}
-              </div>
-            )}
 
-            {/* Processing */}
-            {onboardingStep === 'processing' && (
-              <div className="text-center py-4">
-                <Loader2 className="w-10 h-10 mx-auto text-indigo-600 animate-spin mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Generating Replies</h3>
-
-                <div className="bg-gray-100 rounded-full h-2 mb-2 overflow-hidden">
-                  <div
-                    className="bg-indigo-600 h-2 transition-all duration-300"
-                    style={{ width: `${progress.total ? (progress.processed / progress.total) * 100 : 0}%` }}
-                  />
-                </div>
-                <p className="text-sm text-gray-600 mb-4">
-                  {progress.processed} of {progress.total} comments processed
-                </p>
-
-                <div className="flex items-center justify-center gap-2 text-amber-600 text-xs bg-amber-50 py-2 rounded-lg">
-                  <AlertCircle className="w-4 h-4" />
-                  Please don't close this tab
-                </div>
-              </div>
-            )}
-
-            {/* Complete */}
-            {onboardingStep === 'complete' && (
-              <div className="text-center py-4">
-                <CheckCircle className="w-12 h-12 mx-auto text-green-500 mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">All Done!</h3>
-                <p className="text-sm text-gray-500 mb-6">
-                  {progress.processed} replies generated. You can now review and approve them.
-                </p>
-                <button
-                  onClick={handleClose}
-                  className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-                >
-                  Close
-                </button>
+                {summary.summary.unrepliedComments === 0 && (
+                  <button
+                    onClick={handleSkip}
+                    className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+                  >
+                    Done
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -369,7 +313,6 @@ const ManageAccountsPage = () => {
       )}
 
       <div className="bg-white p-6 rounded-xl shadow-sm border space-y-6">
-        {/* Platform Selection */}
         <div className="flex gap-4">
           <button
             onClick={() => setForm({ ...form, platform: 'instagram' })}
@@ -387,7 +330,6 @@ const ManageAccountsPage = () => {
           </button>
         </div>
 
-        {/* Platform-specific form */}
         {form.platform === 'youtube' ? (
           <div className="text-center py-6">
             <p className="text-gray-600 mb-4 text-sm">Connect via Google to manage your YouTube channel.</p>
@@ -403,7 +345,7 @@ const ManageAccountsPage = () => {
           <form onSubmit={handleSave} className="space-y-4">
             <input
               className="w-full p-3 border rounded-lg text-sm"
-              placeholder="Account Name (e.g. Raptee Main)"
+              placeholder="Account Name"
               value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })}
               required
@@ -430,15 +372,12 @@ const ManageAccountsPage = () => {
         )}
       </div>
 
-      {/* Connected Accounts */}
       <div className="bg-white rounded-xl shadow-sm border mt-6 overflow-hidden">
         <div className="px-6 py-4 border-b">
           <h2 className="font-semibold">Connected Accounts</h2>
         </div>
         {accounts.length === 0 ? (
-          <div className="p-8 text-center text-gray-500 text-sm">
-            No accounts connected yet
-          </div>
+          <div className="p-8 text-center text-gray-500 text-sm">No accounts connected yet</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-600 text-xs uppercase">

@@ -62,8 +62,11 @@ const NotificationDropdown = () => {
             ));
         }
 
-        // Navigate to the account/post
-        if (notif.accountId) {
+        // Navigate to the inbox with the specific post and message
+        if (notif.accountId && notif.postId) {
+            // Navigate to inbox with post and highlight the message
+            navigate(`/account/${notif.accountId}/inbox?postId=${encodeURIComponent(notif.postId)}&messageId=${notif.messageId || ''}`);
+        } else if (notif.accountId) {
             navigate(`/account/${notif.accountId}`);
         }
         setIsOpen(false);
@@ -158,8 +161,8 @@ const NotificationDropdown = () => {
                         <button
                             onClick={() => setFilter('all')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filter === 'all'
-                                    ? 'bg-indigo-100 text-indigo-700'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             All
@@ -167,8 +170,8 @@ const NotificationDropdown = () => {
                         <button
                             onClick={() => setFilter('assignment')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'assignment'
-                                    ? 'bg-blue-100 text-blue-700'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             <UserPlus size={12} />
@@ -177,8 +180,8 @@ const NotificationDropdown = () => {
                         <button
                             onClick={() => setFilter('comment')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'comment'
-                                    ? 'bg-amber-100 text-amber-700'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             <AlertTriangle size={12} />
