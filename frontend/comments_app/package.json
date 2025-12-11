@@ -15,7 +15,9 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
+    "react-is": "^19.2.1",
     "react-router-dom": "^7.10.1",
+    "react-wordcloud": "^1.2.7",
     "recharts": "^3.5.1"
   },
   "devDependencies": {

@@ -225,6 +225,19 @@ app.get('/api/posts-summary', authenticate, async (req, res) => {
     }
 });
 
+// Get ALL Messages (for client-side caching)
+app.get('/api/messages/all', authenticate, async (req, res) => {
+    try {
+        const msgs = await Message.findAll({
+            order: [['createdAt', 'DESC']],
+            include: { model: Account, attributes: ['id', 'name', 'platform'] }
+        });
+        res.json(msgs);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Get Messages (Filtered by Post ID for Detail View)
 app.get('/api/messages', authenticate, async (req, res) => {
     const { accountId, status, approvedBy, postId } = req.query;

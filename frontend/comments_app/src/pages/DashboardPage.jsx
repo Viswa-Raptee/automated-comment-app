@@ -1,17 +1,60 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useAccounts } from '../context/AccountContext';
+import { useState, useEffect, useMemo } from 'react';
+import { useMessages } from '../context/MessageContext';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/api';
 import { toast } from 'react-hot-toast';
 import {
-    RefreshCw, Bell, TrendingUp, MessageSquare, CheckCircle,
-    XCircle, Clock, Filter, Calendar, Youtube, Instagram,
-    ChevronDown, X
+    RefreshCw, TrendingUp, MessageSquare, CheckCircle,
+    XCircle, Clock, Filter, ChevronDown, X
 } from 'lucide-react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend
 } from 'recharts';
+import NotificationDropdown from '../components/NotificationDropdown';
+
+// ============ CUSTOM WORD CLOUD COMPONENT ============
+const WordCloud = ({ words }) => {
+    if (!words || words.length === 0) {
+        return (
+            <div className="flex items-center justify-center h-64 text-gray-400">
+                No word data available
+            </div>
+        );
+    }
+
+    const maxValue = Math.max(...words.map(w => w.value));
+    const minValue = Math.min(...words.map(w => w.value));
+
+    const getSize = (value) => {
+        if (maxValue === minValue) return 18;
+        const normalized = (value - minValue) / (maxValue - minValue);
+        return 12 + normalized * 32; // 12px to 44px
+    };
+
+    const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#ef4444'];
+    const getColor = (index) => colors[index % colors.length];
+
+    return (
+        <div className="flex flex-wrap gap-3 p-4 justify-center items-center min-h-64">
+            {words.map((word, i) => (
+                <span
+                    key={word.text}
+                    className="px-3 py-1.5 rounded-full cursor-default hover:scale-110 transition-transform duration-200"
+                    style={{
+                        fontSize: `${getSize(word.value)}px`,
+                        color: getColor(i),
+                        backgroundColor: `${getColor(i)}10`,
+                        fontWeight: word.value > (maxValue * 0.6) ? 600 : 400
+                    }}
+                    title={`${word.text}: ${word.value} occurrences`}
+                >
+                    {word.text}
+                </span>
+            ))}
+        </div>
+    );
+};
 
 // Color Palette
 const COLORS = {
@@ -24,8 +67,6 @@ const COLORS = {
     cyan: '#06b6d4',
     slate: '#64748b'
 };
-
-const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 // ============ STATS CARD COMPONENT ============
 const StatsCard = ({ title, count, icon: Icon, color, trend }) => (
@@ -51,98 +92,30 @@ const StatsCard = ({ title, count, icon: Icon, color, trend }) => (
     </div>
 );
 
-// ============ WORD CLOUD COMPONENT ============
-const WordCloud = ({ words }) => {
-    if (!words || words.length === 0) {
-        return (
-            <div className="flex items-center justify-center h-64 text-gray-400">
-                No word data available
-            </div>
-        );
-    }
-
-    const maxValue = Math.max(...words.map(w => w.value));
-    const minValue = Math.min(...words.map(w => w.value));
-
-    const getSize = (value) => {
-        if (maxValue === minValue) return 16;
-        const normalized = (value - minValue) / (maxValue - minValue);
-        return 12 + normalized * 24;
-    };
-
-    const getColor = (index) => {
-        const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#ef4444'];
-        return colors[index % colors.length];
-    };
-
-    return (
-        <div className="flex flex-wrap gap-3 p-4 justify-center items-center min-h-64">
-            {words.map((word, i) => (
-                <span
-                    key={word.text}
-                    className="px-3 py-1.5 rounded-full cursor-default hover:scale-110 transition-transform duration-200"
-                    style={{
-                        fontSize: `${getSize(word.value)}px`,
-                        color: getColor(i),
-                        backgroundColor: `${getColor(i)}10`,
-                        fontWeight: word.value > (maxValue * 0.7) ? 600 : 400
-                    }}
-                    title={`${word.text}: ${word.value} occurrences`}
-                >
-                    {word.text}
-                </span>
-            ))}
-        </div>
-    );
-};
-
 // ============ FILTER BAR COMPONENT ============
-const FilterBar = ({ filters, setFilters, accounts, posts, onApply }) => {
-    const [showCustomDate, setShowCustomDate] = useState(false);
-
+const FilterBar = ({ filters, setFilters, accounts, posts }) => {
     const datePresets = [
+        { label: 'Last 24 Hours', value: '24h' },
         { label: 'Last 7 Days', value: '7d' },
         { label: 'Last 30 Days', value: '30d' },
-        { label: 'Last 90 Days', value: '90d' },
-        { label: 'All Time', value: 'all' },
-        { label: 'Custom', value: 'custom' }
+        { label: 'All Time', value: 'all' }
     ];
-
-    const handleDatePreset = (preset) => {
-        if (preset === 'custom') {
-            setShowCustomDate(true);
-            setFilters(f => ({ ...f, datePreset: 'custom' }));
-        } else {
-            setShowCustomDate(false);
-            const now = new Date();
-            let startDate = null;
-
-            if (preset === '7d') startDate = new Date(now - 7 * 24 * 60 * 60 * 1000);
-            else if (preset === '30d') startDate = new Date(now - 30 * 24 * 60 * 60 * 1000);
-            else if (preset === '90d') startDate = new Date(now - 90 * 24 * 60 * 60 * 1000);
-
-            setFilters(f => ({
-                ...f,
-                datePreset: preset,
-                startDate: startDate?.toISOString().split('T')[0] || '',
-                endDate: preset === 'all' ? '' : now.toISOString().split('T')[0]
-            }));
-        }
-    };
 
     const clearFilters = () => {
         setFilters({
             accountId: '',
             postId: '',
-            datePreset: 'all',
-            startDate: '',
-            endDate: ''
+            dateRange: 'all'
         });
-        setShowCustomDate(false);
-        onApply();
     };
 
-    const hasActiveFilters = filters.accountId || filters.postId || filters.datePreset !== 'all';
+    const hasActiveFilters = filters.accountId || filters.postId || filters.dateRange !== 'all';
+
+    // Filter posts based on selected account
+    const filteredPosts = useMemo(() => {
+        if (!filters.accountId) return posts;
+        return posts.filter(p => p.accountId === parseInt(filters.accountId));
+    }, [posts, filters.accountId]);
 
     return (
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 mb-6">
@@ -150,6 +123,7 @@ const FilterBar = ({ filters, setFilters, accounts, posts, onApply }) => {
                 <div className="flex items-center gap-2">
                     <Filter size={18} className="text-indigo-600" />
                     <h3 className="font-semibold text-gray-900">Filters</h3>
+                    <span className="text-xs text-gray-400 ml-2">• Instant filtering</span>
                 </div>
                 {hasActiveFilters && (
                     <button
@@ -161,7 +135,7 @@ const FilterBar = ({ filters, setFilters, accounts, posts, onApply }) => {
                 )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Account Filter */}
                 <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1.5">Account</label>
@@ -192,10 +166,9 @@ const FilterBar = ({ filters, setFilters, accounts, posts, onApply }) => {
                             value={filters.postId}
                             onChange={(e) => setFilters(f => ({ ...f, postId: e.target.value }))}
                             className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                            disabled={!filters.accountId && posts.length === 0}
                         >
                             <option value="">All Videos/Posts</option>
-                            {posts.map(post => (
+                            {filteredPosts.map(post => (
                                 <option key={post.postId} value={post.postId}>
                                     {post.postTitle?.substring(0, 40) || post.postId}
                                 </option>
@@ -205,13 +178,13 @@ const FilterBar = ({ filters, setFilters, accounts, posts, onApply }) => {
                     </div>
                 </div>
 
-                {/* Date Preset */}
+                {/* Date Range */}
                 <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1.5">Date Range</label>
                     <div className="relative">
                         <select
-                            value={filters.datePreset}
-                            onChange={(e) => handleDatePreset(e.target.value)}
+                            value={filters.dateRange}
+                            onChange={(e) => setFilters(f => ({ ...f, dateRange: e.target.value }))}
                             className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                         >
                             {datePresets.map(preset => (
@@ -221,127 +194,67 @@ const FilterBar = ({ filters, setFilters, accounts, posts, onApply }) => {
                         <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
                 </div>
-
-                {/* Apply Button */}
-                <div className="flex items-end">
-                    <button
-                        onClick={onApply}
-                        className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                    >
-                        <Filter size={16} />
-                        Apply Filters
-                    </button>
-                </div>
             </div>
-
-            {/* Custom Date Range */}
-            {showCustomDate && (
-                <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1.5">Start Date</label>
-                        <input
-                            type="date"
-                            value={filters.startDate}
-                            onChange={(e) => setFilters(f => ({ ...f, startDate: e.target.value }))}
-                            className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1.5">End Date</label>
-                        <input
-                            type="date"
-                            value={filters.endDate}
-                            onChange={(e) => setFilters(f => ({ ...f, endDate: e.target.value }))}
-                            className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        />
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
 
+
+
 // ============ MAIN DASHBOARD PAGE ============
 const DashboardPage = () => {
-    const { accounts, fetchAccounts } = useAccounts();
+    const {
+        messages,
+        accounts,
+        loading,
+        addMessages,
+        refresh,
+        getUniquePostsWithStats,
+        getStats,
+        getIntentBreakdown,
+        getWordCloud
+    } = useMessages();
     const { user } = useAuth();
 
-    const [stats, setStats] = useState({ total: 0, approved: 0, pending: 0, rejected: 0 });
-    const [intents, setIntents] = useState([]);
-    const [wordCloud, setWordCloud] = useState([]);
-    const [posts, setPosts] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
-
     const [filters, setFilters] = useState({
         accountId: '',
         postId: '',
-        datePreset: 'all',
-        startDate: '',
-        endDate: ''
+        dateRange: 'all'
     });
 
-    // Build query params from filters
-    const buildQueryParams = useCallback(() => {
-        const params = new URLSearchParams();
-        if (filters.accountId) params.append('accountId', filters.accountId);
-        if (filters.postId) params.append('postId', filters.postId);
-        if (filters.startDate) params.append('startDate', filters.startDate);
-        if (filters.endDate) params.append('endDate', filters.endDate);
-        return params.toString();
-    }, [filters]);
+    // Get posts for filter dropdown
+    const posts = useMemo(() => getUniquePostsWithStats(filters.accountId || null), [getUniquePostsWithStats, filters.accountId]);
 
-    // Fetch all analytics data
-    const fetchAnalytics = useCallback(async () => {
-        setLoading(true);
-        const queryString = buildQueryParams();
+    // Compute stats from local data (instant!)
+    const stats = useMemo(() => getStats({
+        accountId: filters.accountId,
+        postId: filters.postId,
+        dateRange: filters.dateRange
+    }), [getStats, filters]);
 
-        try {
-            const [statsRes, intentsRes, wordCloudRes, postsRes] = await Promise.all([
-                api.get(`/analytics/stats?${queryString}`),
-                api.get(`/analytics/intents?${queryString}`),
-                api.get(`/analytics/wordcloud?${queryString}`),
-                api.get(`/analytics/posts?${filters.accountId ? `accountId=${filters.accountId}` : ''}`)
-            ]);
+    // Compute intents from local data
+    const intents = useMemo(() => getIntentBreakdown({
+        accountId: filters.accountId,
+        postId: filters.postId,
+        dateRange: filters.dateRange
+    }), [getIntentBreakdown, filters]);
 
-            setStats(statsRes.data);
-            setIntents(intentsRes.data.map(i => ({ name: i.intent || 'Unknown', value: parseInt(i.count) })));
-            setWordCloud(wordCloudRes.data);
-            setPosts(postsRes.data);
-        } catch (e) {
-            console.error('Analytics fetch error:', e);
-            toast.error('Failed to load analytics');
-        } finally {
-            setLoading(false);
-        }
-    }, [buildQueryParams, filters.accountId]);
+    // Compute word cloud from local data
+    const wordCloudData = useMemo(() => getWordCloud({
+        accountId: filters.accountId,
+        postId: filters.postId,
+        dateRange: filters.dateRange
+    }), [getWordCloud, filters]);
 
-    // Auto-sync on mount
-    const autoSync = useCallback(async () => {
-        setSyncing(true);
-        try {
-            await api.post('/sync-all');
-            // Silently sync - no toast for auto-sync
-        } catch (e) {
-            console.error('Auto-sync error:', e);
-        } finally {
-            setSyncing(false);
-        }
-    }, []);
-
-    // Initial load
-    useEffect(() => {
-        fetchAccounts();
-        autoSync().then(() => fetchAnalytics());
-    }, []);
-
-    // Manual sync
+    // Manual sync - fetches new messages only
     const handleManualSync = async () => {
         setSyncing(true);
         try {
             const { data } = await api.post('/sync-all');
-            toast.success(data.message);
-            await fetchAnalytics();
+            toast.success(data.message || 'Sync complete');
+            // Refresh all data after sync
+            await refresh();
         } catch (e) {
             toast.error('Sync failed');
         } finally {
@@ -363,16 +276,13 @@ const DashboardPage = () => {
                 <div className="flex items-center gap-3">
                     <div>
                         <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
-                        <p className="text-xs text-gray-500">Analytics Overview</p>
+                        <p className="text-xs text-gray-500">Analytics Overview • Real-time filtering</p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {/* Notification Button */}
-                    <button className="relative p-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors">
-                        <Bell size={20} className="text-gray-600" />
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
-                    </button>
+                    {/* Notification Dropdown */}
+                    <NotificationDropdown />
 
                     {/* Sync Button */}
                     <button
@@ -422,7 +332,6 @@ const DashboardPage = () => {
                     setFilters={setFilters}
                     accounts={accounts}
                     posts={posts}
-                    onApply={fetchAnalytics}
                 />
 
                 {/* Charts Section */}
@@ -504,8 +413,10 @@ const DashboardPage = () => {
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Comment Keywords</h3>
                     {loading ? (
                         <div className="h-64 flex items-center justify-center text-gray-400">Loading...</div>
+                    ) : wordCloudData.length === 0 ? (
+                        <div className="h-64 flex items-center justify-center text-gray-400">No word data available</div>
                     ) : (
-                        <WordCloud words={wordCloud} />
+                        <WordCloud words={wordCloudData} />
                     )}
                 </div>
             </div>
