@@ -263,14 +263,17 @@ async function syncAccount(account, options = {}) {
                         for (const th of threads.data.items || []) {
                             const sn = th.snippet.topLevelComment.snippet;
                             const externalId = th.id;
+                            const threadId = th.id;  // Thread ID is the same as top-level comment ID
                             const replyCount = th.snippet.totalReplyCount || 0;
 
-                            const exists = await Message.findOne({ where: { externalId } });
-                            if (!exists) {
+                            // Check if parent already exists
+                            let parentMsg = await Message.findOne({ where: { externalId } });
+
+                            if (!parentMsg) {
                                 let intent = null;
                                 let aiDraft = null;
 
-                                // Skip AI generation for already-replied comments
+                                // Only generate AI for parent comments without replies
                                 const isAlreadyReplied = replyCount > 0;
 
                                 if (!skipAiGeneration && !isAlreadyReplied) {
@@ -287,10 +290,12 @@ async function syncAccount(account, options = {}) {
 
                                 const commentDate = sn.publishedAt ? new Date(sn.publishedAt) : new Date();
 
-                                const newMsg = await Message.create({
+                                parentMsg = await Message.create({
                                     platform: 'youtube',
                                     accountId: account.id,
                                     externalId,
+                                    threadId,
+                                    parentId: null,  // Top-level comment
                                     postId: videoId,
                                     postTitle: videoData?.title,
                                     mediaUrl: videoData?.thumb,
@@ -301,16 +306,54 @@ async function syncAccount(account, options = {}) {
                                     aiDraft,
                                     status: isAlreadyReplied ? 'posted' : 'pending',
                                     createdAt: commentDate,
-                                    // For already-replied, set approval info
                                     approvedBy: isAlreadyReplied ? 'Synced' : null,
                                     postedAt: isAlreadyReplied ? commentDate : null
                                 });
 
                                 // Auto-notify for complaints/questions (only if AI ran and not replied)
                                 if (intent && !isAlreadyReplied) {
-                                    await notifyAllUsersForIntent(newMsg, intent, account.id, videoId);
+                                    await notifyAllUsersForIntent(parentMsg, intent, account.id, videoId);
                                 }
                                 newCount++;
+                            }
+
+                            // Now process replies (nested comments)
+                            if (th.replies && th.replies.comments) {
+                                for (const reply of th.replies.comments) {
+                                    const replySn = reply.snippet;
+                                    const replyExternalId = reply.id;
+                                    const replyAuthorChannelId = replySn.authorChannelId?.value || '';
+
+                                    // Check if this reply is from the channel owner (our account)
+                                    const isOwnReply = replyAuthorChannelId === account.identifier;
+                                    const replyDate = replySn.publishedAt ? new Date(replySn.publishedAt) : new Date();
+
+                                    // Use findOrCreate to prevent race conditions
+                                    const [replyMsg, replyCreated] = await Message.findOrCreate({
+                                        where: { externalId: replyExternalId },
+                                        defaults: {
+                                            platform: 'youtube',
+                                            accountId: account.id,
+                                            externalId: replyExternalId,
+                                            threadId,
+                                            parentId: parentMsg.id,  // Point to parent message
+                                            postId: videoId,
+                                            postTitle: videoData?.title,
+                                            mediaUrl: videoData?.thumb,
+                                            authorName: (replySn.authorDisplayName || '').replace(/^@/, ''),
+                                            authorId: replyAuthorChannelId,
+                                            content: replySn.textDisplay,
+                                            intent: isOwnReply ? null : 'Nested Reply',  // Tag child comments
+                                            aiDraft: null,
+                                            // Mark channel owner's replies as 'posted', others as 'pending'
+                                            status: isOwnReply ? 'posted' : 'pending',
+                                            approvedBy: isOwnReply ? 'Channel Owner' : null,
+                                            postedAt: isOwnReply ? replyDate : null,
+                                            createdAt: replyDate
+                                        }
+                                    });
+                                    if (replyCreated) newCount++;
+                                }
                             }
                         }
                     } catch (commentErr) {
@@ -325,8 +368,8 @@ async function syncAccount(account, options = {}) {
 
     // 2. INSTAGRAM SYNC
     if (account.platform === 'instagram') {
-        // Fetch media with insights
-        const fields = 'id,caption,media_type,media_url,thumbnail_url,permalink,like_count,comments_count,timestamp,comments{id,text,username,timestamp}';
+        // Fetch media with insights and comments with replies
+        const fields = 'id,caption,media_type,media_url,thumbnail_url,permalink,like_count,comments_count,timestamp,comments{id,text,username,timestamp,replies{id,text,username,timestamp}}';
         const url = `https://graph.facebook.com/v19.0/${account.identifier}/media?fields=${fields}&access_token=${account.accessToken}`;
 
         try {
@@ -368,21 +411,30 @@ async function syncAccount(account, options = {}) {
                 // Process comments
                 if (media.comments) {
                     for (const c of media.comments.data) {
-                        const exists = await Message.findOne({ where: { externalId: c.id } });
-                        if (!exists) {
+                        const threadId = c.id;  // Thread ID is the top-level comment ID
+
+                        // Check if parent already exists
+                        let parentMsg = await Message.findOne({ where: { externalId: c.id } });
+
+                        if (!parentMsg) {
                             let intent = null;
                             let aiDraft = null;
 
-                            if (!skipAiGeneration) {
+                            // Only generate AI for top-level comments without replies
+                            const hasReplies = c.replies && c.replies.data && c.replies.data.length > 0;
+
+                            if (!skipAiGeneration && !hasReplies) {
                                 const ai = await analyzeAndDraft(c.text, 'instagram');
                                 intent = ai.intent;
                                 aiDraft = ai.reply;
                             }
 
-                            const newMsg = await Message.create({
+                            parentMsg = await Message.create({
                                 platform: 'instagram',
                                 accountId: account.id,
                                 externalId: c.id,
+                                threadId,
+                                parentId: null,  // Top-level comment
                                 postId: media.id,
                                 postTitle: postTitle,
                                 mediaUrl: mediaImage,
@@ -390,15 +442,50 @@ async function syncAccount(account, options = {}) {
                                 content: c.text,
                                 intent,
                                 aiDraft,
-                                status: 'pending',
-                                createdAt: c.timestamp ? new Date(c.timestamp) : new Date()
+                                status: hasReplies ? 'posted' : 'pending',
+                                createdAt: c.timestamp ? new Date(c.timestamp) : new Date(),
+                                approvedBy: hasReplies ? 'Synced' : null,
+                                postedAt: hasReplies ? new Date(c.timestamp) : null
                             });
 
                             // Auto-notify for complaints/questions (only if AI ran)
-                            if (intent) {
-                                await notifyAllUsersForIntent(newMsg, intent, account.id, media.id);
+                            if (intent && !hasReplies) {
+                                await notifyAllUsersForIntent(parentMsg, intent, account.id, media.id);
                             }
                             newCount++;
+                        }
+
+                        // Process replies (nested comments)
+                        if (c.replies && c.replies.data) {
+                            for (const reply of c.replies.data) {
+                                const existingReply = await Message.findOne({ where: { externalId: reply.id } });
+                                if (!existingReply) {
+                                    // Check if this reply is from the account owner
+                                    const isOwnReply = reply.username === account.name;
+                                    const replyDate = reply.timestamp ? new Date(reply.timestamp) : new Date();
+
+                                    await Message.create({
+                                        platform: 'instagram',
+                                        accountId: account.id,
+                                        externalId: reply.id,
+                                        threadId,
+                                        parentId: parentMsg.id,
+                                        postId: media.id,
+                                        postTitle: postTitle,
+                                        mediaUrl: mediaImage,
+                                        authorName: reply.username,
+                                        content: reply.text,
+                                        intent: isOwnReply ? null : 'Nested Reply',  // Tag child comments
+                                        aiDraft: null,
+                                        // Mark account owner's replies as 'posted', others as 'pending'
+                                        status: isOwnReply ? 'posted' : 'pending',
+                                        approvedBy: isOwnReply ? 'Account Owner' : null,
+                                        postedAt: isOwnReply ? replyDate : null,
+                                        createdAt: replyDate
+                                    });
+                                    newCount++;
+                                }
+                            }
                         }
                     }
                 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw, MoreVertical, Star, UserPlus, StickyNote, X, CheckCircle } from 'lucide-react';
+import { RefreshCw, MoreVertical, Star, UserPlus, StickyNote, X, CheckCircle, Sparkles, MessageSquare, ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../api/api';
 import { toast } from 'react-hot-toast';
 
@@ -171,17 +171,20 @@ const ActionsMenu = ({ msg, onUpdate, onClose }) => {
 };
 
 // ============ MAIN MESSAGE CARD ============
-const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) => {
-  const [draft, setDraft] = useState(msg.aiDraft || "");
+const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, replies = [], depth = 0 }) => {
+  // For Our Reply cards, the reply text is in content, not aiDraft
+  const [draft, setDraft] = useState(msg.aiDraft || msg.content || "");
   const [sending, setSending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [localMsg, setLocalMsg] = useState(msg);
   const [isEditing, setIsEditing] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [showReplies, setShowReplies] = useState(true);
 
   // Update local state when msg changes
   useEffect(() => {
     setLocalMsg(msg);
-    setDraft(msg.aiDraft || "");
+    setDraft(msg.aiDraft || msg.content || "");
   }, [msg]);
 
   const normalizedIntent = (localMsg.intent || "").trim().toLowerCase();
@@ -196,7 +199,9 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) =
             ? "bg-blue-100 text-blue-700"
             : normalizedIntent === "question"
               ? "bg-indigo-100 text-indigo-700"
-              : "bg-gray-100 text-gray-600";
+              : normalizedIntent === "nested reply"
+                ? "bg-violet-100 text-violet-700"
+                : "bg-gray-100 text-gray-600";
   const intentLabel = localMsg.intent || "General";
 
   const handleClick = async () => {
@@ -244,25 +249,60 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) =
     }
   };
 
+  const handleGenerateReply = async () => {
+    if (generatingAI) return;
+    setGeneratingAI(true);
+    try {
+      const { data } = await api.post(`/messages/${localMsg.id}/generate-reply`);
+      setLocalMsg(prev => ({ ...prev, ...data.message }));
+      setDraft(data.message.aiDraft || "");
+      toast.success("AI reply generated!");
+    } catch (e) {
+      toast.error("Failed to generate reply");
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
+
+  // Check if this is a child comment (has a parent)
+  const isChildComment = depth > 0 || localMsg.parentId;
+  const hasReplies = replies && replies.length > 0;
+
+  // Check if this is our own reply (from channel owner)
+  const isOwnReply = localMsg.approvedBy === 'Channel Owner' || localMsg.approvedBy === 'Account Owner';
+
   return (
     <div className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${localMsg.isImportant ? 'border-amber-300 ring-2 ring-amber-100' :
-      isPosted ? 'border-green-200' : 'border-gray-200'
+      isOwnReply ? 'border-indigo-200 bg-indigo-50/30' :
+        isPosted ? 'border-green-200' : 'border-gray-200'
       }`}>
-      {/* Posted Badge */}
-      {isPosted && (
+      {/* Our Reply Badge (different from user-approved replies) */}
+      {isOwnReply && (
+        <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 flex items-center gap-2">
+          <div className="w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center">
+            <CheckCircle size={12} className="text-white" />
+          </div>
+          <span className="text-indigo-700 text-xs font-medium">
+            Our Reply • {new Date(localMsg.createdAt).toLocaleString()}
+          </span>
+        </div>
+      )}
+
+      {/* Posted Badge (for user-approved replies, not own replies) */}
+      {isPosted && !isOwnReply && (
         <div className="bg-green-50 border-b border-green-100 px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-green-700 text-xs font-medium">
             <CheckCircle size={14} />
             Reply sent{localMsg.approvedBy ? ` by @${localMsg.approvedBy}` : ''}{localMsg.postedAt ? ` on ${new Date(localMsg.postedAt).toLocaleString()}` : ''}
           </div>
-          {!isEditing && (
+          {/* {!isEditing && (
             <button
               onClick={() => setIsEditing(true)}
               className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
             >
               Edit Reply
             </button>
-          )}
+          )} */}
         </div>
       )}
 
@@ -333,69 +373,158 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) =
           </div>
         )}
 
-        {/* Customer Message */}
-        <p className="text-gray-800 text-sm mb-4 bg-gray-50 p-4 rounded-lg">
-          "{localMsg.content}"
-        </p>
+        {/* Customer Message - HIDE for Our Reply cards (they ARE the reply, not a customer message) */}
+        {!isOwnReply && (
+          <p className="text-gray-800 text-sm mb-4 bg-gray-50 p-4 rounded-lg">
+            "{localMsg.content}"
+          </p>
+        )}
 
-        {/* AI Draft / Reply */}
-        <div className="mb-0">
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 block">
-            {isPosted ? 'Sent Reply' : 'AI Generated Reply'}
-          </label>
-          {isPosted && !isEditing ? (
-            <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-sm text-gray-800">
-              {localMsg.aiDraft}
+        {/* AI Draft / Reply Section */}
+        {/* For Our Reply cards: show the reply content with edit capability */}
+        {/* For pending: show draft editor */}
+        {/* For posted parents WITH replies: hide (reply shown in child card) */}
+        {(!isPosted || isOwnReply || !hasReplies) && (
+          <div className="mb-0">
+            {/* Don't show label for Our Reply cards - the badge already says "Our Reply" */}
+            {!isOwnReply && (
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 block">
+                {isPosted ? 'Sent Reply' : (localMsg.aiDraft ? 'AI Generated Reply' : 'Draft Reply')}
+              </label>
+            )}
+
+            {/* Show Generate Reply button if no AI draft and not posted and not our own reply */}
+            {!localMsg.aiDraft && !isPosted && !isOwnReply && (
+              <button
+                onClick={handleGenerateReply}
+                disabled={generatingAI}
+                className="mb-3 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg text-sm font-medium hover:from-purple-600 hover:to-indigo-600 disabled:opacity-70 transition-all"
+              >
+                {generatingAI ? (
+                  <><RefreshCw className="animate-spin" size={14} /> Generating...</>
+                ) : (
+                  <><Sparkles size={14} /> Generate AI Reply</>
+                )}
+              </button>
+            )}
+
+            {/* Our Reply cards - show content or edit textarea */}
+            {isOwnReply ? (
+              isEditing ? (
+                <textarea
+                  className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Edit your reply..."
+                  disabled={sending}
+                  style={{ minHeight: '80px', height: 'auto' }}
+                  rows={Math.max(3, Math.ceil(draft.length / 60))}
+                />
+              ) : (
+                <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-lg text-sm text-gray-800">
+                  {localMsg.content}
+                </div>
+              )
+            ) : (
+              /* Regular posted or pending comments */
+              isPosted && !isEditing ? (
+                <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-sm text-gray-800">
+                  {localMsg.aiDraft}
+                </div>
+              ) : (
+                <textarea
+                  className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Draft reply..."
+                  disabled={sending}
+                  style={{ minHeight: '80px', height: 'auto' }}
+                  rows={Math.max(3, Math.ceil(draft.length / 60))}
+                />
+              )
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Nested Replies Section */}
+      {hasReplies && (
+        <div className="px-6 pb-4">
+          <button
+            onClick={() => setShowReplies(!showReplies)}
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800 mb-3"
+          >
+            {showReplies ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <MessageSquare size={14} />
+            <span>{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
+          </button>
+
+          {showReplies && (
+            <div className={`space-y-3 ${depth < 2 ? 'ml-4 pl-4 border-l-2 border-gray-200' : ''}`}>
+              {replies.map(reply => (
+                <MessageCard
+                  key={reply.id}
+                  msg={reply}
+                  onApprove={onApprove}
+                  onUpdateMessage={onUpdateMessage}
+                  onRefresh={onRefresh}
+                  isPosted={reply.status === 'posted'}
+                  replies={reply.replies || []}
+                  depth={depth + 1}
+                />
+              ))}
             </div>
-          ) : (
-            <textarea
-              className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Draft reply..."
-              disabled={sending}
-              style={{ minHeight: '80px', height: 'auto' }}
-              rows={Math.max(3, Math.ceil(draft.length / 60))}
-            />
           )}
         </div>
-      </div>
+      )}
 
-      {/* Footer */}
-      <div className="bg-gray-50 px-6 py-3 border-t flex justify-end gap-3">
-        {isPosted && isEditing ? (
-          <>
+      {/* Footer - hide entirely for posted parents that have nested replies */}
+      {(!isPosted || isOwnReply || !hasReplies || isEditing) && (
+        <div className="bg-gray-50 px-6 py-3 border-t flex justify-end gap-3">
+          {/* Editing mode - Cancel & Save */}
+          {isEditing ? (
+            <>
+              <button
+                onClick={() => { setIsEditing(false); setDraft(localMsg.aiDraft || localMsg.content || ""); }}
+                className="text-sm text-gray-600 hover:text-gray-800 px-4 py-2 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={sending}
+                className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
+              >
+                {sending && <RefreshCw className="animate-spin" size={14} />}
+                {sending ? "Saving..." : "Save Changes"}
+              </button>
+            </>
+          ) : isOwnReply ? (
+            /* Our Reply card - show Edit button */
             <button
-              onClick={() => { setIsEditing(false); setDraft(localMsg.aiDraft || ""); }}
-              className="text-sm text-gray-600 hover:text-gray-800 px-4 py-2 font-medium transition-colors"
+              onClick={() => setIsEditing(true)}
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-800 px-4 py-2 transition-colors"
             >
-              Cancel
+              Edit Reply
             </button>
-            <button
-              onClick={handleEditSave}
-              disabled={sending}
-              className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
-            >
-              {sending && <RefreshCw className="animate-spin" size={14} />}
-              {sending ? "Saving..." : "Save Changes"}
-            </button>
-          </>
-        ) : !isPosted ? (
-          <>
-            <button onClick={handleDismiss} disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
-              Dismiss
-            </button>
-            <button
-              onClick={handleClick}
-              disabled={sending}
-              className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
-            >
-              {sending && <RefreshCw className="animate-spin" size={14} />}
-              {sending ? "Sending..." : "Approve & Send"}
-            </button>
-          </>
-        ) : null}
-      </div>
+          ) : !isPosted ? (
+            /* Pending comments - Dismiss & Approve buttons */
+            <>
+              <button onClick={handleDismiss} disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
+                Dismiss
+              </button>
+              <button
+                onClick={handleClick}
+                disabled={sending}
+                className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 flex items-center gap-2 transition-colors"
+              >
+                {sending && <RefreshCw className="animate-spin" size={14} />}
+                {sending ? "Sending..." : "Approve & Send"}
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 };

@@ -187,12 +187,12 @@ app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
         // Sync the account to fetch videos and comments (skip AI generation)
         const newCount = await syncAccount(account, { skipAiGeneration: true });
 
-        // Get summary stats
+        // Get summary stats - ONLY count parent comments (exclude nested replies)
         const [videoCount, totalComments, pendingCount, approvedCount] = await Promise.all([
             Post.count({ where: { accountId: account.id } }),
-            Message.count({ where: { accountId: account.id } }),
-            Message.count({ where: { accountId: account.id, status: 'pending' } }),  // Unreplied = pending
-            Message.count({ where: { accountId: account.id, status: 'posted' } })
+            Message.count({ where: { accountId: account.id, parentId: null } }),  // Only parents
+            Message.count({ where: { accountId: account.id, status: 'pending', parentId: null } }),  // Unreplied parents
+            Message.count({ where: { accountId: account.id, status: 'posted', parentId: null } })   // Replied parents
         ]);
 
         // Get post date range
@@ -247,10 +247,12 @@ app.post('/api/accounts/:id/batch-generate', authenticate, async (req, res) => {
             postIds = posts.map(p => p.postId);
         }
 
-        // Get all comments without AI drafts (optionally filtered by post date)
+        // Get all PARENT comments without AI drafts (optionally filtered by post date)
+        // Only generate AI for parent comments, not nested replies
         const messageWhere = {
             accountId: account.id,
-            aiDraft: null
+            aiDraft: null,
+            parentId: null  // Only parent comments, not replies
         };
         if (postIds !== null) {
             messageWhere.postId = { [require('sequelize').Op.in]: postIds };
@@ -401,7 +403,113 @@ app.get('/api/messages', authenticate, async (req, res) => {
     res.json(msgs);
 });
 
-// Approve & Reply
+// Get threaded messages (grouped by threadId with nested structure)
+app.get('/api/messages/threaded', authenticate, async (req, res) => {
+    try {
+        const { postId, accountId } = req.query;
+        const where = { parentId: null };  // Only get top-level comments
+
+        if (postId) where.postId = postId;
+        if (accountId) where.accountId = accountId;
+
+        const parentMessages = await Message.findAll({
+            where,
+            order: [['createdAt', 'DESC']],
+            include: [
+                { model: Account, attributes: ['name', 'platform'] },
+                {
+                    model: Message,
+                    as: 'replies',
+                    order: [['createdAt', 'ASC']],
+                    include: [
+                        {
+                            model: Message,
+                            as: 'replies',  // Nested replies (for multi-level)
+                            order: [['createdAt', 'ASC']]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        res.json(parentMessages);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Generate AI reply on-demand for a specific message
+app.post('/api/messages/:id/generate-reply', authenticate, async (req, res) => {
+    try {
+        const msg = await Message.findByPk(req.params.id, { include: Account });
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        if (msg.aiDraft) {
+            return res.json({ success: true, message: msg, note: 'AI draft already exists' });
+        }
+
+        const { analyzeAndDraft } = require('./services/rag');
+        const ai = await analyzeAndDraft(msg.content, msg.platform);
+
+        msg.intent = ai.intent;
+        msg.aiDraft = ai.reply;
+        await msg.save();
+
+        console.log(`🤖 Generated AI reply for message ${msg.id}`);
+        res.json({ success: true, message: msg });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Reply to a specific comment (creates a new message and posts to platform)
+app.post('/api/messages/:id/reply', authenticate, async (req, res) => {
+    const { replyText } = req.body;
+    if (!replyText) return res.status(400).json({ error: 'Reply text is required' });
+
+    try {
+        const parentMsg = await Message.findByPk(req.params.id, { include: Account });
+        if (!parentMsg) return res.status(404).json({ error: 'Message not found' });
+
+        let replyId = null;
+
+        // Post reply to platform
+        if (parentMsg.Account.platform === 'youtube') {
+            // Reply to the specific comment (use comment ID, not thread ID)
+            const commentId = parentMsg.externalId.startsWith('Ug')
+                ? parentMsg.externalId.split('.')[0]  // Extract comment ID from thread ID
+                : parentMsg.externalId;
+            replyId = await postYouTubeReply(commentId, replyText, parentMsg.Account);
+        } else if (parentMsg.Account.platform === 'instagram') {
+            replyId = await postInstagramReply(parentMsg.externalId, replyText, parentMsg.Account);
+        }
+
+        // Create reply message in database
+        const replyMsg = await Message.create({
+            platform: parentMsg.platform,
+            accountId: parentMsg.accountId,
+            externalId: replyId || `reply_${Date.now()}`,
+            threadId: parentMsg.threadId,
+            parentId: parentMsg.id,
+            postId: parentMsg.postId,
+            postTitle: parentMsg.postTitle,
+            mediaUrl: parentMsg.mediaUrl,
+            authorName: req.user.username,
+            content: replyText,
+            status: 'posted',
+            approvedBy: req.user.username,
+            postedAt: new Date(),
+            replyExternalId: replyId
+        });
+
+        console.log(`💬 Reply posted by ${req.user.username} to message ${parentMsg.id}`);
+        res.json({ success: true, reply: replyMsg });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Approve & Reply - Creates a child "Our Reply" message
 app.post('/api/messages/:id/approve', authenticate, async (req, res) => {
     const { replyText } = req.body;
 
@@ -414,24 +522,40 @@ app.post('/api/messages/:id/approve', authenticate, async (req, res) => {
 
         // Execute Platform Reply
         if (msg.Account.platform === 'youtube') {
-            // YouTube comments.insert returns the full comment object including ID
             replyId = await postYouTubeReply(msg.externalId, finalReply, msg.Account);
         } else if (msg.Account.platform === 'instagram') {
-            // Instagram returns the new comment ID
             replyId = await postInstagramReply(msg.externalId, finalReply, msg.Account);
         }
 
-        // Update DB
+        // Mark parent as posted (has been replied to)
         msg.status = 'posted';
         msg.aiDraft = finalReply;
         msg.approvedBy = req.user.username;
         msg.postedAt = new Date();
-        if (replyId && typeof replyId === 'string') {
-            msg.replyExternalId = replyId;
-        }
         await msg.save();
 
-        res.json({ success: true });
+        // Create child "Our Reply" message
+        const ourReply = await Message.create({
+            platform: msg.platform,
+            accountId: msg.accountId,
+            externalId: replyId || `reply-${Date.now()}`,
+            threadId: msg.threadId || msg.externalId,
+            parentId: msg.id,  // Link to parent
+            postId: msg.postId,
+            postTitle: msg.postTitle,
+            mediaUrl: msg.mediaUrl,
+            authorName: msg.Account.name,  // Channel/account name
+            authorId: msg.Account.identifier || '',
+            content: finalReply,
+            intent: null,
+            aiDraft: null,
+            status: 'posted',
+            approvedBy: 'Channel Owner',  // Mark as our reply
+            postedAt: new Date(),
+            createdAt: new Date()
+        });
+
+        res.json({ success: true, ourReply });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -744,29 +868,34 @@ app.put('/api/messages/:id/edit-reply', authenticate, async (req, res) => {
         if (!msg) return res.status(404).json({ error: 'Message not found' });
         if (msg.status !== 'posted') return res.status(400).json({ error: 'Can only edit posted messages' });
 
-        const previousReply = msg.aiDraft;
+        const previousReply = msg.content || msg.aiDraft;
+
+        // Determine which ID to use for platform update
+        // For "Our Reply" child cards (created from approve), externalId IS the reply ID
+        // For legacy parent cards, replyExternalId has the reply ID
+        const replyIdForPlatform = msg.parentId ? msg.externalId : msg.replyExternalId;
 
         // Update on platform
         if (msg.Account.platform === 'youtube') {
-            // For YouTube replies, we need the reply comment ID (not the parent comment ID)
-            // The externalId is the parent comment, we need to track the reply ID
-            // For now, we'll update assuming there's a replyExternalId field
-            // If not available, we can only update locally
-            if (msg.replyExternalId) {
-                await updateYouTubeComment(msg.replyExternalId, replyText, msg.Account);
+            if (replyIdForPlatform) {
+                await updateYouTubeComment(replyIdForPlatform, replyText, msg.Account);
             } else {
                 console.log('⚠️ No reply ID stored, updating locally only');
             }
         } else if (msg.Account.platform === 'instagram') {
             // Instagram: delete and repost
-            if (msg.replyExternalId) {
-                const newId = await updateInstagramReply(msg.replyExternalId, msg.externalId, replyText, msg.Account);
-                msg.replyExternalId = newId;
+            if (replyIdForPlatform) {
+                const parentCommentId = msg.parentId ?
+                    (await Message.findByPk(msg.parentId))?.externalId : msg.externalId;
+                const newId = await updateInstagramReply(replyIdForPlatform, parentCommentId, replyText, msg.Account);
+                msg.externalId = newId;  // Update with new ID
             } else {
                 console.log('⚠️ No reply ID stored, updating locally only');
             }
         }
 
+        // Update both content and aiDraft to cover all cases
+        msg.content = replyText;
         msg.aiDraft = replyText;
         msg.editedBy = req.user.username;
         msg.editedAt = new Date();

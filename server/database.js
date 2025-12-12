@@ -74,7 +74,8 @@ const Message = sequelize.define('Message', {
   mediaUrl: { type: DataTypes.TEXT },      // Thumbnail or Video URL
   // ========================================
 
-  threadId: { type: DataTypes.STRING },    // For nested replies
+  threadId: { type: DataTypes.STRING },    // Platform's thread ID (YouTube commentThread ID)
+  parentId: { type: DataTypes.INTEGER, allowNull: true },  // Parent message ID (null = top-level)
   authorName: { type: DataTypes.STRING },
   authorId: { type: DataTypes.STRING },
   content: { type: DataTypes.TEXT },
@@ -145,6 +146,10 @@ Notification.belongsTo(User, { foreignKey: 'userId' });
 
 Notification.belongsTo(Message, { foreignKey: 'messageId' });
 
+// Self-referential for nested comments
+Message.hasMany(Message, { as: 'replies', foreignKey: 'parentId' });
+Message.belongsTo(Message, { as: 'parent', foreignKey: 'parentId' });
+
 // Sync - manually add columns for SQLite compatibility
 async function syncDatabase() {
   try {
@@ -163,6 +168,8 @@ async function syncDatabase() {
       { table: 'Messages', column: 'editedBy', type: 'TEXT' },
       { table: 'Messages', column: 'editedAt', type: 'DATETIME' },
       { table: 'Messages', column: 'replyExternalId', type: 'TEXT' },
+      { table: 'Messages', column: 'parentId', type: 'INTEGER' },
+      { table: 'Messages', column: 'threadId', type: 'TEXT' },
       // Post table
       { table: 'Posts', column: 'viewCount', type: 'INTEGER DEFAULT 0' },
       { table: 'Posts', column: 'likeCount', type: 'INTEGER DEFAULT 0' },

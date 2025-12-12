@@ -182,9 +182,9 @@ export const MessageProvider = ({ children }) => {
         return filtered;
     }, [messages]);
 
-    // Get stats
+    // Get stats - only count parent comments (not nested replies)
     const getStats = useCallback((filters = {}) => {
-        const filtered = filterMessages(filters);
+        const filtered = filterMessages(filters).filter(m => !m.parentId);  // Only parents
         return {
             total: filtered.length,
             pending: filtered.filter(m => m.status === 'pending').length,
@@ -234,6 +234,38 @@ export const MessageProvider = ({ children }) => {
             .slice(0, 50); // Top 50 words
     }, [filterMessages]);
 
+    // Build threaded structure from flat messages
+    const getThreadedMessages = useCallback((filters = {}) => {
+        const filtered = filterMessages(filters);
+
+        // Create a map of id -> message for quick lookup
+        const messageMap = new Map();
+        filtered.forEach(m => messageMap.set(m.id, { ...m, replies: [] }));
+
+        // Organize into parent-child structure
+        const parents = [];
+
+        messageMap.forEach(msg => {
+            if (msg.parentId && messageMap.has(msg.parentId)) {
+                // Add as child to parent
+                messageMap.get(msg.parentId).replies.push(msg);
+            } else if (!msg.parentId) {
+                // Top-level comment
+                parents.push(msg);
+            }
+        });
+
+        // Sort replies by createdAt ascending (oldest first)
+        messageMap.forEach(msg => {
+            msg.replies.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        });
+
+        // Sort parents by createdAt descending (newest first)
+        parents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        return parents;
+    }, [filterMessages]);
+
     return (
         <MessageContext.Provider value={{
             messages,
@@ -248,7 +280,8 @@ export const MessageProvider = ({ children }) => {
             filterMessages,
             getStats,
             getIntentBreakdown,
-            getWordCloud
+            getWordCloud,
+            getThreadedMessages
         }}>
             {children}
         </MessageContext.Provider>

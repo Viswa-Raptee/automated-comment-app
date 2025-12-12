@@ -156,7 +156,8 @@ const InboxPage = () => {
   const [filters, setFilters] = useState({
     status: 'all',       // 'all', 'pending', 'posted', 'rejected'
     commenter: '',       // Search by author name
-    dateRange: 'all'     // 'all', '24h', '7d', '30d'
+    dateRange: 'all',    // 'all', '24h', '7d', '30d'
+    hasReplies: false    // Filter for threads with nested replies
   });
 
   const currentPost = posts[currentPostIndex] || null;
@@ -261,7 +262,31 @@ const InboxPage = () => {
         }
       }
 
-      setMessages(filtered);
+      // Build threaded structure - only show parent comments at top level
+      const messageMap = new Map();
+      filtered.forEach(m => messageMap.set(m.id, { ...m, replies: [] }));
+
+      const parents = [];
+      messageMap.forEach(msg => {
+        if (msg.parentId && messageMap.has(msg.parentId)) {
+          messageMap.get(msg.parentId).replies.push(msg);
+        } else if (!msg.parentId) {
+          parents.push(msg);
+        }
+      });
+
+      // Sort replies by createdAt ascending (oldest first)
+      messageMap.forEach(msg => {
+        msg.replies.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      });
+
+      // Apply hasReplies filter - only show threads with nested replies
+      let filteredParents = parents;
+      if (filters.hasReplies) {
+        filteredParents = parents.filter(p => p.replies && p.replies.length > 0);
+      }
+
+      setMessages(filteredParents);
     } catch (e) {
       console.error("Could not load comments:", e);
     }
@@ -479,9 +504,9 @@ const InboxPage = () => {
                     ({messages.length})
                   </span>
                 </h3>
-                {(filters.status !== 'all' || filters.commenter || filters.dateRange !== 'all') && (
+                {(filters.status !== 'all' || filters.commenter || filters.dateRange !== 'all' || filters.hasReplies) && (
                   <button
-                    onClick={() => setFilters({ status: 'all', commenter: '', dateRange: 'all' })}
+                    onClick={() => setFilters({ status: 'all', commenter: '', dateRange: 'all', hasReplies: false })}
                     className="text-xs text-gray-500 hover:text-red-500 flex items-center gap-1"
                   >
                     <X size={12} /> Clear Filters
@@ -547,6 +572,20 @@ const InboxPage = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* Has Replies Toggle */}
+                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-200">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.hasReplies}
+                      onChange={(e) => setFilters(f => ({ ...f, hasReplies: e.target.checked }))}
+                      className="w-4 h-4 text-violet-600 rounded border-gray-300 focus:ring-violet-500"
+                    />
+                    <span className="text-sm text-gray-700">Show only threads with replies</span>
+                  </label>
+                  <span className="text-xs text-gray-400">(Conversations with activity)</span>
+                </div>
               </div>
             </div>
 
@@ -576,6 +615,7 @@ const InboxPage = () => {
                     onApprove={handleApprove}
                     onRefresh={fetchMessages}
                     isPosted={msg.status === 'posted'}
+                    replies={msg.replies || []}
                   />
                 ))}
               </div>
