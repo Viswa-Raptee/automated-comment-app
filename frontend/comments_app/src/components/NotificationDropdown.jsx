@@ -47,8 +47,9 @@ const NotificationDropdown = () => {
     // Filter notifications
     const filteredNotifications = notifications.filter(n => {
         if (filter === 'all') return true;
+        if (filter === 'question') return n.type === 'question';
+        if (filter === 'complaint') return n.type === 'complaint';
         if (filter === 'assignment') return n.type === 'assignment';
-        if (filter === 'comment') return n.type === 'complaint' || n.type === 'question';
         return true;
     });
 
@@ -157,7 +158,7 @@ const NotificationDropdown = () => {
                     </div>
 
                     {/* Filter Tabs */}
-                    <div className="px-4 py-2 border-b border-gray-200 flex gap-2">
+                    <div className="px-4 py-2 border-b border-gray-200 flex flex-wrap gap-2">
                         <button
                             onClick={() => setFilter('all')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filter === 'all'
@@ -168,6 +169,26 @@ const NotificationDropdown = () => {
                             All
                         </button>
                         <button
+                            onClick={() => setFilter('question')}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'question'
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                        >
+                            <HelpCircle size={12} />
+                            Questions
+                        </button>
+                        <button
+                            onClick={() => setFilter('complaint')}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'complaint'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                        >
+                            <AlertTriangle size={12} />
+                            Complaints
+                        </button>
+                        <button
                             onClick={() => setFilter('assignment')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'assignment'
                                 ? 'bg-blue-100 text-blue-700'
@@ -176,16 +197,6 @@ const NotificationDropdown = () => {
                         >
                             <UserPlus size={12} />
                             Assignments
-                        </button>
-                        <button
-                            onClick={() => setFilter('comment')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${filter === 'comment'
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
-                        >
-                            <AlertTriangle size={12} />
-                            Comments
                         </button>
                     </div>
 

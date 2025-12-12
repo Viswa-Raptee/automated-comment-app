@@ -35,36 +35,103 @@ function getOAuthClientWithRefresh(refreshToken) {
     return oauth2Client;
 }
 
-// --- INSTAGRAM GRAPH API ---
-async function postInstagramReply(commentId, text, account) {
-    const url = `https://graph.facebook.com/v19.0/${commentId}/replies`;
-    try {
-        await axios.post(url, {
-            message: text,
-            access_token: account.accessToken
-        });
-        return true;
-    } catch (e) {
-        console.error("IG Reply Error:", e.response?.data || e.message);
-        throw new Error("Failed to reply on Instagram");
-    }
-}
 
 // --- YOUTUBE DATA API ---
 async function postYouTubeReply(commentId, text, account) {
     const oauth2Client = getOAuthClientWithRefresh(account.secondaryToken);
     const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
     try {
-        await youtube.comments.insert({
+        const response = await youtube.comments.insert({
             part: 'snippet',
             requestBody: {
                 snippet: { parentId: commentId, textOriginal: text }
             }
         });
-        return true;
+        // Return the new reply comment ID
+        return response.data?.id || true;
     } catch (e) {
         console.error("YT Reply Error:", e.message);
         throw new Error("Failed to reply on YouTube");
+    }
+}
+
+// Update an existing YouTube comment
+async function updateYouTubeComment(commentId, newText, account) {
+    const oauth2Client = getOAuthClientWithRefresh(account.secondaryToken);
+    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+    try {
+        // Per YouTube API docs: need to provide full comment resource with id and snippet.textOriginal
+        const response = await youtube.comments.update({
+            part: 'snippet',
+            requestBody: {
+                id: commentId,
+                snippet: {
+                    textOriginal: newText
+                }
+            }
+        });
+        console.log('✅ YouTube comment updated:', commentId);
+        return response.data?.id || true;
+    } catch (e) {
+        console.error("YT Update Error:", e.response?.data || e.message);
+        throw new Error("Failed to update YouTube comment: " + (e.response?.data?.error?.message || e.message));
+    }
+}
+
+// Delete a YouTube comment
+async function deleteYouTubeComment(commentId, account) {
+    const oauth2Client = getOAuthClientWithRefresh(account.secondaryToken);
+    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+    try {
+        await youtube.comments.delete({ id: commentId });
+        return true;
+    } catch (e) {
+        console.error("YT Delete Error:", e.message);
+        throw new Error("Failed to delete YouTube comment");
+    }
+}
+
+// --- INSTAGRAM GRAPH API ---
+async function postInstagramReply(commentId, text, account) {
+    const url = `https://graph.facebook.com/v19.0/${commentId}/replies`;
+    try {
+        const response = await axios.post(url, {
+            message: text,
+            access_token: account.accessToken
+        });
+        // Return the new comment ID for tracking
+        return response.data?.id || true;
+    } catch (e) {
+        console.error("IG Reply Error:", e.response?.data || e.message);
+        throw new Error("Failed to reply on Instagram");
+    }
+}
+
+// Delete an Instagram comment
+async function deleteInstagramComment(commentId, account) {
+    const url = `https://graph.facebook.com/v19.0/${commentId}`;
+    try {
+        await axios.delete(url, {
+            params: { access_token: account.accessToken }
+        });
+        return true;
+    } catch (e) {
+        console.error("IG Delete Error:", e.response?.data || e.message);
+        throw new Error("Failed to delete Instagram comment");
+    }
+}
+
+// Update Instagram reply (delete old + post new)
+async function updateInstagramReply(oldCommentId, parentCommentId, newText, account) {
+    try {
+        // Delete the old reply
+        await deleteInstagramComment(oldCommentId, account);
+        // Post new reply
+        const newId = await postInstagramReply(parentCommentId, newText, account);
+        return newId;
+    } catch (e) {
+        console.error("IG Update Error:", e.message);
+        throw new Error("Failed to update Instagram reply");
     }
 }
 
@@ -187,7 +254,7 @@ async function syncAccount(account, options = {}) {
 
                     try {
                         const threads = await youtube.commentThreads.list({
-                            part: 'snippet',
+                            part: 'snippet,replies',
                             videoId,
                             maxResults: 20,
                             textFormat: 'plainText'
@@ -196,17 +263,29 @@ async function syncAccount(account, options = {}) {
                         for (const th of threads.data.items || []) {
                             const sn = th.snippet.topLevelComment.snippet;
                             const externalId = th.id;
+                            const replyCount = th.snippet.totalReplyCount || 0;
 
                             const exists = await Message.findOne({ where: { externalId } });
                             if (!exists) {
                                 let intent = null;
                                 let aiDraft = null;
 
-                                if (!skipAiGeneration) {
+                                // Skip AI generation for already-replied comments
+                                const isAlreadyReplied = replyCount > 0;
+
+                                if (!skipAiGeneration && !isAlreadyReplied) {
                                     const ai = await analyzeAndDraft(sn.textDisplay, 'youtube');
                                     intent = ai.intent;
                                     aiDraft = ai.reply;
                                 }
+
+                                // Clean up author name (YouTube sometimes includes @ prefix)
+                                let cleanAuthorName = sn.authorDisplayName || '';
+                                if (cleanAuthorName.startsWith('@')) {
+                                    cleanAuthorName = cleanAuthorName.substring(1);
+                                }
+
+                                const commentDate = sn.publishedAt ? new Date(sn.publishedAt) : new Date();
 
                                 const newMsg = await Message.create({
                                     platform: 'youtube',
@@ -215,16 +294,20 @@ async function syncAccount(account, options = {}) {
                                     postId: videoId,
                                     postTitle: videoData?.title,
                                     mediaUrl: videoData?.thumb,
-                                    authorName: sn.authorDisplayName,
+                                    authorName: cleanAuthorName,
                                     authorId: sn.authorChannelId?.value || '',
                                     content: sn.textDisplay,
                                     intent,
                                     aiDraft,
-                                    status: 'pending'
+                                    status: isAlreadyReplied ? 'posted' : 'pending',
+                                    createdAt: commentDate,
+                                    // For already-replied, set approval info
+                                    approvedBy: isAlreadyReplied ? 'Synced' : null,
+                                    postedAt: isAlreadyReplied ? commentDate : null
                                 });
 
-                                // Auto-notify for complaints/questions (only if AI ran)
-                                if (intent) {
+                                // Auto-notify for complaints/questions (only if AI ran and not replied)
+                                if (intent && !isAlreadyReplied) {
                                     await notifyAllUsersForIntent(newMsg, intent, account.id, videoId);
                                 }
                                 newCount++;
@@ -307,7 +390,8 @@ async function syncAccount(account, options = {}) {
                                 content: c.text,
                                 intent,
                                 aiDraft,
-                                status: 'pending'
+                                status: 'pending',
+                                createdAt: c.timestamp ? new Date(c.timestamp) : new Date()
                             });
 
                             // Auto-notify for complaints/questions (only if AI ran)
@@ -330,6 +414,10 @@ async function syncAccount(account, options = {}) {
 module.exports = {
     postInstagramReply,
     postYouTubeReply,
+    updateYouTubeComment,
+    deleteYouTubeComment,
+    deleteInstagramComment,
+    updateInstagramReply,
     syncAccount,
     loadClientSecrets,
     notifyAllUsersForIntent

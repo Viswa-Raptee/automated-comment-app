@@ -100,7 +100,10 @@ const Message = sequelize.define('Message', {
 
   // === Edit tracking ===
   editedBy: { type: DataTypes.STRING },
-  editedAt: { type: DataTypes.DATE }
+  editedAt: { type: DataTypes.DATE },
+
+  // === Reply tracking for edit functionality ===
+  replyExternalId: { type: DataTypes.STRING }  // The ID of our reply on the platform
 });
 
 // --- 4. NOTIFICATION ---
@@ -159,6 +162,7 @@ async function syncDatabase() {
       { table: 'Messages', column: 'notesAddedBy', type: 'TEXT' },
       { table: 'Messages', column: 'editedBy', type: 'TEXT' },
       { table: 'Messages', column: 'editedAt', type: 'DATETIME' },
+      { table: 'Messages', column: 'replyExternalId', type: 'TEXT' },
       // Post table
       { table: 'Posts', column: 'viewCount', type: 'INTEGER DEFAULT 0' },
       { table: 'Posts', column: 'likeCount', type: 'INTEGER DEFAULT 0' },

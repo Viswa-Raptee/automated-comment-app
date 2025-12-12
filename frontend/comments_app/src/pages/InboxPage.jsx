@@ -6,7 +6,7 @@ import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import {
   ChevronLeft, ChevronRight, RefreshCw, Youtube, Instagram, ArrowLeft,
-  Eye, Heart, MessageCircle, Share2, Clock, CheckCircle, XCircle
+  Eye, Heart, MessageCircle, Share2, Clock, CheckCircle, XCircle, Filter, Search, ChevronDown, X
 } from 'lucide-react';
 import MessageCard from '../components/MessageCard';
 import NotificationDropdown from '../components/NotificationDropdown';
@@ -151,7 +151,13 @@ const InboxPage = () => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('pending'); // 'all', 'pending', 'posted'
+
+  // Comprehensive filters
+  const [filters, setFilters] = useState({
+    status: 'all',       // 'all', 'pending', 'posted', 'rejected'
+    commenter: '',       // Search by author name
+    dateRange: 'all'     // 'all', '24h', '7d', '30d'
+  });
 
   const currentPost = posts[currentPostIndex] || null;
 
@@ -217,15 +223,49 @@ const InboxPage = () => {
     }
     try {
       let url = `/messages?accountId=${selectedAccount.id}&postId=${currentPost.postId}`;
-      if (statusFilter !== 'all') {
-        url += `&status=${statusFilter}`;
+      if (filters.status !== 'all') {
+        url += `&status=${filters.status}`;
       }
       const { data } = await api.get(url);
-      setMessages(data);
+
+      // Client-side filtering for commenter and dateRange
+      let filtered = data;
+
+      // Filter by commenter name
+      if (filters.commenter.trim()) {
+        const search = filters.commenter.toLowerCase().trim();
+        filtered = filtered.filter(m =>
+          (m.authorName || '').toLowerCase().includes(search)
+        );
+      }
+
+      // Filter by date range
+      if (filters.dateRange !== 'all') {
+        const now = new Date();
+        let startDate;
+        switch (filters.dateRange) {
+          case '24h':
+            startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            break;
+          case '7d':
+            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+          case '30d':
+            startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            break;
+          default:
+            startDate = null;
+        }
+        if (startDate) {
+          filtered = filtered.filter(m => new Date(m.createdAt) >= startDate);
+        }
+      }
+
+      setMessages(filtered);
     } catch (e) {
       console.error("Could not load comments:", e);
     }
-  }, [selectedAccount, currentPost, statusFilter]);
+  }, [selectedAccount, currentPost, filters]);
 
   useEffect(() => {
     fetchMessages();
@@ -430,29 +470,83 @@ const InboxPage = () => {
         {/* Comments Panel */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-3xl mx-auto">
-            {/* Comments Header with Filter Tabs */}
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-gray-900">
-                Comments
-                <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({messages.length})
-                </span>
-              </h3>
-
-              {/* Filter Tabs */}
-              <div className="flex bg-gray-100 p-1 rounded-lg">
-                {['all', 'pending', 'posted'].map((f) => (
+            {/* Comments Header with Filter Panel */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900">
+                  Comments
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    ({messages.length})
+                  </span>
+                </h3>
+                {(filters.status !== 'all' || filters.commenter || filters.dateRange !== 'all') && (
                   <button
-                    key={f}
-                    onClick={() => setStatusFilter(f)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all capitalize ${statusFilter === f
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                      }`}
+                    onClick={() => setFilters({ status: 'all', commenter: '', dateRange: 'all' })}
+                    className="text-xs text-gray-500 hover:text-red-500 flex items-center gap-1"
                   >
-                    {f}
+                    <X size={12} /> Clear Filters
                   </button>
-                ))}
+                )}
+              </div>
+
+              {/* Filter Bar */}
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <Filter size={14} className="text-indigo-600" />
+                  <span className="text-xs font-medium text-gray-600">Filters</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Status Filter */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+                    <div className="relative">
+                      <select
+                        value={filters.status}
+                        onChange={(e) => setFilters(f => ({ ...f, status: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="all">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="posted">Posted</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Commenter Search */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Commenter</label>
+                    <div className="relative">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        value={filters.commenter}
+                        onChange={(e) => setFilters(f => ({ ...f, commenter: e.target.value }))}
+                        placeholder="Search by name..."
+                        className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Timeline Filter */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Timeline</label>
+                    <div className="relative">
+                      <select
+                        value={filters.dateRange}
+                        onChange={(e) => setFilters(f => ({ ...f, dateRange: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="all">All Time</option>
+                        <option value="24h">Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                        <option value="30d">Last 30 Days</option>
+                      </select>
+                      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -463,12 +557,14 @@ const InboxPage = () => {
                   <CheckCircle size={32} className="text-green-500" />
                 </div>
                 <p className="text-gray-600 font-medium">
-                  {statusFilter === 'pending' ? 'No pending comments' :
-                    statusFilter === 'posted' ? 'No posted comments' : 'No comments'}
+                  {filters.status === 'pending' ? 'No pending comments' :
+                    filters.status === 'posted' ? 'No posted comments' :
+                      filters.status === 'rejected' ? 'No rejected comments' : 'No comments found'}
                 </p>
                 <p className="text-sm text-gray-400 mt-1">
-                  {statusFilter === 'pending' ? 'All caught up for this post!' :
-                    statusFilter === 'posted' ? 'No replies have been sent yet' : 'No comments found'}
+                  {filters.commenter || filters.dateRange !== 'all'
+                    ? 'Try adjusting your filters'
+                    : filters.status === 'pending' ? 'All caught up for this post!' : 'No comments match your criteria'}
                 </p>
               </div>
             ) : (

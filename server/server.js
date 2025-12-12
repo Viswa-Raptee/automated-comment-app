@@ -10,7 +10,7 @@ require('dotenv').config();
 // --- IMPORTS ---
 const { sequelize, User, Account, Post, Message, Notification } = require('./database');
 const { authenticate, isAdmin } = require('./middleware/auth');
-const { syncAccount, postInstagramReply, postYouTubeReply, loadClientSecrets, notifyAllUsersForIntent } = require('./services/platforms');
+const { syncAccount, postInstagramReply, postYouTubeReply, updateYouTubeComment, updateInstagramReply, loadClientSecrets, notifyAllUsersForIntent } = require('./services/platforms');
 
 const app = express();
 app.use(cors());
@@ -188,10 +188,10 @@ app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
         const newCount = await syncAccount(account, { skipAiGeneration: true });
 
         // Get summary stats
-        const [videoCount, totalComments, withoutDraft, approvedCount] = await Promise.all([
+        const [videoCount, totalComments, pendingCount, approvedCount] = await Promise.all([
             Post.count({ where: { accountId: account.id } }),
             Message.count({ where: { accountId: account.id } }),
-            Message.count({ where: { accountId: account.id, aiDraft: null } }),
+            Message.count({ where: { accountId: account.id, status: 'pending' } }),  // Unreplied = pending
             Message.count({ where: { accountId: account.id, status: 'posted' } })
         ]);
 
@@ -215,7 +215,7 @@ app.post('/api/accounts/:id/onboard', authenticate, async (req, res) => {
             summary: {
                 videos: videoCount,
                 totalComments,
-                unrepliedComments: withoutDraft,
+                unrepliedComments: pendingCount,
                 approvedComments: approvedCount,
                 newComments: newCount,
                 earliestPost,
@@ -410,12 +410,15 @@ app.post('/api/messages/:id/approve', authenticate, async (req, res) => {
         if (!msg) return res.status(404).json({ error: 'Message not found' });
 
         const finalReply = replyText || msg.aiDraft;
+        let replyId = null;
 
         // Execute Platform Reply
         if (msg.Account.platform === 'youtube') {
-            await postYouTubeReply(msg.externalId, finalReply, msg.Account);
+            // YouTube comments.insert returns the full comment object including ID
+            replyId = await postYouTubeReply(msg.externalId, finalReply, msg.Account);
         } else if (msg.Account.platform === 'instagram') {
-            await postInstagramReply(msg.externalId, finalReply, msg.Account);
+            // Instagram returns the new comment ID
+            replyId = await postInstagramReply(msg.externalId, finalReply, msg.Account);
         }
 
         // Update DB
@@ -423,6 +426,9 @@ app.post('/api/messages/:id/approve', authenticate, async (req, res) => {
         msg.aiDraft = finalReply;
         msg.approvedBy = req.user.username;
         msg.postedAt = new Date();
+        if (replyId && typeof replyId === 'string') {
+            msg.replyExternalId = replyId;
+        }
         await msg.save();
 
         res.json({ success: true });
@@ -734,17 +740,56 @@ app.get('/api/users/list', authenticate, async (req, res) => {
 app.put('/api/messages/:id/edit-reply', authenticate, async (req, res) => {
     const { replyText } = req.body;
     try {
-        const msg = await Message.findByPk(req.params.id);
+        const msg = await Message.findByPk(req.params.id, { include: Account });
         if (!msg) return res.status(404).json({ error: 'Message not found' });
         if (msg.status !== 'posted') return res.status(400).json({ error: 'Can only edit posted messages' });
 
         const previousReply = msg.aiDraft;
+
+        // Update on platform
+        if (msg.Account.platform === 'youtube') {
+            // For YouTube replies, we need the reply comment ID (not the parent comment ID)
+            // The externalId is the parent comment, we need to track the reply ID
+            // For now, we'll update assuming there's a replyExternalId field
+            // If not available, we can only update locally
+            if (msg.replyExternalId) {
+                await updateYouTubeComment(msg.replyExternalId, replyText, msg.Account);
+            } else {
+                console.log('⚠️ No reply ID stored, updating locally only');
+            }
+        } else if (msg.Account.platform === 'instagram') {
+            // Instagram: delete and repost
+            if (msg.replyExternalId) {
+                const newId = await updateInstagramReply(msg.replyExternalId, msg.externalId, replyText, msg.Account);
+                msg.replyExternalId = newId;
+            } else {
+                console.log('⚠️ No reply ID stored, updating locally only');
+            }
+        }
+
         msg.aiDraft = replyText;
         msg.editedBy = req.user.username;
         msg.editedAt = new Date();
         await msg.save();
 
         console.log(`📝 Reply edited by ${req.user.username}: "${previousReply}" -> "${replyText}"`);
+
+        res.json({ success: true, message: msg });
+    } catch (e) {
+        console.error('Edit reply error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Reject/Dismiss a message
+app.put('/api/messages/:id/reject', authenticate, async (req, res) => {
+    try {
+        const msg = await Message.findByPk(req.params.id);
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        msg.status = 'rejected';
+        msg.approvedBy = req.user.username; // Track who rejected
+        await msg.save();
 
         res.json({ success: true, message: msg });
     } catch (e) {

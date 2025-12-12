@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast';
 import axios from 'axios';
 import api from '../api/api';
 import { useJob } from '../context/JobContext';
+import { useMessages } from '../context/MessageContext';
 import { Instagram, Youtube, Loader2, CheckCircle, Video, MessageSquare, Clock, Calendar } from 'lucide-react';
 
 const ManageAccountsPage = () => {
@@ -13,6 +14,7 @@ const ManageAccountsPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { startJob } = useJob();
+  const { refresh: refreshMessages } = useMessages();
 
   // Onboarding state
   const [onboardingAccount, setOnboardingAccount] = useState(null);
@@ -107,8 +109,11 @@ const ManageAccountsPage = () => {
         // Use global job context - closes modal and shows floating progress
         startJob(data.jobId, data.accountName, data.total);
         toast.success(`Generating ${data.total} replies in background`);
+        // Refresh dashboard data
+        refreshMessages();
       } else {
         toast.success('No comments to process');
+        refreshMessages();
       }
 
       // Close onboarding modal - progress continues in background
@@ -124,7 +129,25 @@ const ManageAccountsPage = () => {
     setOnboardingStep('idle');
     setOnboardingAccount(null);
     setSummary(null);
+    // Refresh dashboard data
+    refreshMessages();
     toast.success('Setup complete! Comments will be processed as they come in.');
+  };
+
+  const handleCancel = async () => {
+    if (!onboardingAccount) return;
+    try {
+      // Delete the account since user cancelled onboarding
+      await api.delete(`/accounts/${onboardingAccount}?deleteData=true`);
+      setAccounts(prev => prev.filter(a => a.id !== onboardingAccount));
+      toast.success('Onboarding cancelled');
+    } catch {
+      toast.error('Failed to cancel');
+    } finally {
+      setOnboardingStep('idle');
+      setOnboardingAccount(null);
+      setSummary(null);
+    }
   };
 
   // Delete functions
@@ -178,8 +201,22 @@ const ManageAccountsPage = () => {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Account</h3>
             <p className="text-sm text-gray-600 mb-4">
-              To delete <strong>{deleteModal.account?.name}</strong>, type:
+              Choose how to delete <strong>{deleteModal.account?.name}</strong>:
             </p>
+
+            {/* Delete Options */}
+            <div className="space-y-3 mb-4">
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <p className="text-sm font-medium text-gray-700 mb-1">🔗 Disconnect Only</p>
+                <p className="text-xs text-gray-500">Remove account access but keep all comments and analytics data for future reference.</p>
+              </div>
+              <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+                <p className="text-sm font-medium text-red-700 mb-1">🗑️ Delete Everything</p>
+                <p className="text-xs text-red-600">Permanently delete this account and ALL associated posts, comments, and analytics data.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-2">To proceed, type:</p>
             <div className="bg-gray-100 rounded-lg px-3 py-2 mb-4 font-mono text-sm text-gray-700">
               {expectedDeleteText}
             </div>
@@ -190,17 +227,24 @@ const ManageAccountsPage = () => {
               placeholder="Type to confirm"
               className="w-full p-3 border rounded-lg text-sm mb-4"
             />
-            <div className="flex gap-3">
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => deleteAccount(false)}
+                disabled={deleteConfirmText !== expectedDeleteText}
+                className="bg-gray-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Disconnect
+              </button>
               <button
                 onClick={() => deleteAccount(true)}
                 disabled={deleteConfirmText !== expectedDeleteText}
-                className="flex-1 bg-red-600 text-white py-2.5 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="bg-red-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Delete Everything
+                Delete All
               </button>
               <button
                 onClick={closeDeleteModal}
-                className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                className="bg-gray-100 text-gray-700 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
               >
                 Cancel
               </button>
@@ -295,16 +339,30 @@ const ManageAccountsPage = () => {
                         Skip
                       </button>
                     </div>
+                    <button
+                      onClick={handleCancel}
+                      className="w-full mt-2 text-sm text-gray-500 hover:text-red-600 transition-colors"
+                    >
+                      Cancel & Remove Account
+                    </button>
                   </>
                 )}
 
                 {summary.summary.unrepliedComments === 0 && (
-                  <button
-                    onClick={handleSkip}
-                    className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-                  >
-                    Done
-                  </button>
+                  <>
+                    <button
+                      onClick={handleSkip}
+                      className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+                    >
+                      Done
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      className="w-full mt-2 text-sm text-gray-500 hover:text-red-600 transition-colors"
+                    >
+                      Cancel & Remove Account
+                    </button>
+                  </>
                 )}
               </div>
             )}

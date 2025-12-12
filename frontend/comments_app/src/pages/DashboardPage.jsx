@@ -6,7 +6,7 @@ import api from '../api/api';
 import { toast } from 'react-hot-toast';
 import {
     RefreshCw, TrendingUp, MessageSquare, CheckCircle,
-    XCircle, Clock, Filter, ChevronDown, X
+    XCircle, Clock, Filter, ChevronDown, X, AlertTriangle, HelpCircle
 } from 'lucide-react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -296,7 +296,7 @@ const DashboardPage = () => {
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto p-6">
                 {/* Stats Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-5 mb-6">
                     <StatsCard
                         title="Total Comments"
                         count={stats.total}
@@ -320,6 +320,18 @@ const DashboardPage = () => {
                         count={stats.rejected}
                         icon={XCircle}
                         color={COLORS.danger}
+                    />
+                    <StatsCard
+                        title="Complaints"
+                        count={stats.complaints}
+                        icon={AlertTriangle}
+                        color={COLORS.pink}
+                    />
+                    <StatsCard
+                        title="Questions"
+                        count={stats.questions}
+                        icon={HelpCircle}
+                        color={COLORS.cyan}
                     />
                 </div>
 

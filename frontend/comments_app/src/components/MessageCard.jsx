@@ -230,6 +230,20 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) =
     }
   };
 
+  const handleDismiss = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      await api.put(`/messages/${localMsg.id}/reject`);
+      toast.success("Comment dismissed");
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      toast.error("Failed to dismiss");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${localMsg.isImportant ? 'border-amber-300 ring-2 ring-amber-100' :
       isPosted ? 'border-green-200' : 'border-gray-200'
@@ -239,7 +253,7 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) =
         <div className="bg-green-50 border-b border-green-100 px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-green-700 text-xs font-medium">
             <CheckCircle size={14} />
-            Reply sent by @{localMsg.approvedBy} on {localMsg.postedAt ? new Date(localMsg.postedAt).toLocaleString() : 'Unknown'}
+            Reply sent{localMsg.approvedBy ? ` by @${localMsg.approvedBy}` : ''}{localMsg.postedAt ? ` on ${new Date(localMsg.postedAt).toLocaleString()}` : ''}
           </div>
           {!isEditing && (
             <button
@@ -368,7 +382,7 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted }) =
           </>
         ) : !isPosted ? (
           <>
-            <button disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
+            <button onClick={handleDismiss} disabled={sending} className="text-sm text-gray-600 hover:text-red-600 px-4 py-2 font-medium transition-colors">
               Dismiss
             </button>
             <button
