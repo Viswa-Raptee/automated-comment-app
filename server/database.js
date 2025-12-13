@@ -16,7 +16,17 @@ const sequelize = new Sequelize({
 const User = sequelize.define('User', {
   username: { type: DataTypes.STRING, unique: true, allowNull: false },
   password: { type: DataTypes.STRING, allowNull: false },
+  email: { type: DataTypes.STRING, unique: true, allowNull: true },
   role: { type: DataTypes.ENUM('admin', 'user'), defaultValue: 'user' }
+});
+
+// --- 1.5. MAGIC LINK (for email assignment) ---
+const MagicLink = sequelize.define('MagicLink', {
+  token: { type: DataTypes.STRING(128), unique: true, allowNull: false },
+  userId: { type: DataTypes.INTEGER, allowNull: false },
+  messageId: { type: DataTypes.INTEGER, allowNull: false },
+  expiresAt: { type: DataTypes.DATE, allowNull: false },
+  actionTaken: { type: DataTypes.BOOLEAN, defaultValue: false }  // Expires when action taken
 });
 
 const Account = sequelize.define('Account', {
@@ -194,6 +204,8 @@ async function syncDatabase() {
       // Language detection
       { table: 'Messages', column: 'detectedLanguage', type: 'TEXT' },
       { table: 'Messages', column: 'assistanceNeeded', type: 'INTEGER DEFAULT 0' },
+      // User email
+      { table: 'Users', column: 'email', type: 'TEXT' },
     ];
 
     for (const { table, column, type } of columnsToAdd) {
@@ -216,4 +228,4 @@ async function syncDatabase() {
 
 syncDatabase();
 
-module.exports = { sequelize, User, Account, Post, Message, Notification, ChromaConfig, Template };
+module.exports = { sequelize, User, Account, Post, Message, Notification, ChromaConfig, Template, MagicLink };

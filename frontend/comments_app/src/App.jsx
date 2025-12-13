@@ -16,6 +16,7 @@ import AuditPage from './pages/AuditPage';
 import ManageAccountsPage from './pages/ManageAccountsPage';
 import ManageDatabasePage from './pages/ManageDatabasePage';
 import CommentViewPage from './pages/CommentViewPage';
+import CommentViewerPage from './pages/CommentViewerPage';
 import LoginPage from './pages/LoginPage';
 
 const App = () => {
@@ -39,6 +40,8 @@ const App = () => {
               <div className="flex h-screen bg-gray-100 font-sans">
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
+                  {/* Magic link viewer - no auth required, handles its own auth */}
+                  <Route path="/view-comment/:token" element={<CommentViewerPage />} />
                   <Route path="/*" element={
                     <ProtectedRoute>
                       <div className="flex h-full w-full">

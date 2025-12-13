@@ -8,9 +8,11 @@ const fs = require('fs');
 require('dotenv').config();
 
 // --- IMPORTS ---
-const { sequelize, User, Account, Post, Message, Notification, Template } = require('./database');
+const { sequelize, User, Account, Post, Message, Notification, Template, MagicLink } = require('./database');
 const { authenticate, isAdmin } = require('./middleware/auth');
 const { syncAccount, postInstagramReply, postYouTubeReply, updateYouTubeComment, updateInstagramReply, loadClientSecrets, notifyAllUsersForIntent } = require('./services/platforms');
+const { sendAssignmentEmail } = require('./services/email');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -501,6 +503,167 @@ app.post('/api/messages/:id/generate-reply', authenticate, async (req, res) => {
 
         console.log(`🤖 Generated AI reply for message ${msg.id}`);
         res.json({ success: true, message: msg });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Assign a comment to a user and send email notification
+app.put('/api/messages/:id/assign', authenticate, async (req, res) => {
+    try {
+        const { assignedTo } = req.body;
+        if (!assignedTo) return res.status(400).json({ error: 'assignedTo is required' });
+
+        const msg = await Message.findByPk(req.params.id, { include: Account });
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        // Get current user (assigner)
+        const assigner = await User.findByPk(req.user.id);
+
+        // Get assignee user
+        const assignee = await User.findOne({ where: { username: assignedTo } });
+
+        // Update message
+        msg.assignedTo = assignedTo;
+        msg.assignedBy = req.user.username;
+        await msg.save();
+
+        // If assignee has email, generate magic link and send email
+        if (assignee && assignee.email) {
+            // Generate secure token
+            const token = crypto.randomBytes(32).toString('hex');
+
+            // Create magic link (expires in 3 days)
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 3);
+
+            await MagicLink.create({
+                token,
+                userId: assignee.id,
+                messageId: msg.id,
+                expiresAt,
+                actionTaken: false
+            });
+
+            // Send email
+            const emailSent = await sendAssignmentEmail(
+                assignee.email,
+                assignee.username,
+                msg,
+                token,
+                assigner?.username || 'Team member'
+            );
+
+            if (emailSent) {
+                console.log(`📧 Assignment email sent to ${assignee.email}`);
+            }
+        }
+
+        // Create notification
+        await Notification.create({
+            userId: assignee?.id || null,
+            type: 'assignment',
+            messageId: msg.id,
+            title: 'Comment Assigned',
+            body: `${req.user.username} assigned a comment to you`,
+            isRead: false
+        });
+
+        res.json({
+            success: true,
+            assignedTo: msg.assignedTo,
+            assignedBy: msg.assignedBy,
+            emailSent: !!(assignee && assignee.email)
+        });
+    } catch (e) {
+        console.error('Assignment error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Magic link validation and auto-authentication
+app.get('/api/magic-link/:token', async (req, res) => {
+    try {
+        const { token } = req.params;
+
+        const magicLink = await MagicLink.findOne({ where: { token } });
+
+        if (!magicLink) {
+            return res.status(404).json({ error: 'Invalid or expired link' });
+        }
+
+        if (magicLink.expiresAt < new Date()) {
+            return res.status(410).json({ error: 'Link has expired' });
+        }
+
+        if (magicLink.actionTaken) {
+            return res.status(410).json({ error: 'Action already taken on this link' });
+        }
+
+        // Get user and message
+        const user = await User.findByPk(magicLink.userId);
+        const message = await Message.findByPk(magicLink.messageId, {
+            include: Account
+        });
+
+        if (!user || !message) {
+            return res.status(404).json({ error: 'User or message not found' });
+        }
+
+        // Generate JWT for auto-authentication
+        const authToken = jwt.sign(
+            { id: user.id, username: user.username, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        // Get full thread (parent + all replies)
+        let thread = [];
+        if (message.parentId) {
+            // This is a child comment, get the parent
+            const parent = await Message.findByPk(message.parentId, { include: Account });
+            if (parent) {
+                const replies = await Message.findAll({
+                    where: { parentId: parent.id },
+                    include: Account,
+                    order: [['createdAt', 'ASC']]
+                });
+                thread = [parent, ...replies];
+            }
+        } else {
+            // This is a parent comment, get replies
+            const replies = await Message.findAll({
+                where: { parentId: message.id },
+                include: Account,
+                order: [['createdAt', 'ASC']]
+            });
+            thread = [message, ...replies];
+        }
+
+        res.json({
+            success: true,
+            authToken,
+            user: { id: user.id, username: user.username, email: user.email },
+            message,
+            thread,
+            magicLinkId: magicLink.id
+        });
+    } catch (e) {
+        console.error('Magic link error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mark magic link action as taken
+app.post('/api/magic-link/:id/complete', authenticate, async (req, res) => {
+    try {
+        const magicLink = await MagicLink.findByPk(req.params.id);
+        if (!magicLink) return res.status(404).json({ error: 'Magic link not found' });
+
+        magicLink.actionTaken = true;
+        await magicLink.save();
+
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
