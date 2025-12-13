@@ -172,8 +172,11 @@ const ActionsMenu = ({ msg, onUpdate, onClose }) => {
 
 // ============ MAIN MESSAGE CARD ============
 const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, replies = [], depth = 0 }) => {
-  // For Our Reply cards, the reply text is in content, not aiDraft
-  const [draft, setDraft] = useState(msg.aiDraft || msg.content || "");
+  // Check if this is our own reply (channel owner reply) - need to check this first for draft init
+  const isOwnReplyCheck = msg.approvedBy === 'Channel Owner' || msg.approvedBy === 'Account Owner';
+
+  // For Our Reply cards, use content. For pending comments, use aiDraft only (may be empty)
+  const [draft, setDraft] = useState(isOwnReplyCheck ? msg.content : (msg.aiDraft || ""));
   const [sending, setSending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [localMsg, setLocalMsg] = useState(msg);
@@ -184,7 +187,8 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, rep
   // Update local state when msg changes
   useEffect(() => {
     setLocalMsg(msg);
-    setDraft(msg.aiDraft || msg.content || "");
+    const isOwnReply = msg.approvedBy === 'Channel Owner' || msg.approvedBy === 'Account Owner';
+    setDraft(isOwnReply ? msg.content : (msg.aiDraft || ""));
   }, [msg]);
 
   const normalizedIntent = (localMsg.intent || "").trim().toLowerCase();
@@ -199,8 +203,8 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, rep
             ? "bg-blue-100 text-blue-700"
             : normalizedIntent === "question"
               ? "bg-indigo-100 text-indigo-700"
-              : normalizedIntent === "nested reply"
-                ? "bg-violet-100 text-violet-700"
+              : normalizedIntent === "pending thread"
+                ? "bg-orange-100 text-orange-700"
                 : "bg-gray-100 text-gray-600";
   const intentLabel = localMsg.intent || "General";
 
@@ -336,10 +340,12 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, rep
               </span>
             )}
 
-            {/* Intent Badge */}
-            <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${intentClasses}`}>
-              {intentLabel}
-            </span>
+            {/* Intent Badge - hide for Our Reply cards */}
+            {!isOwnReply && (
+              <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${intentClasses}`}>
+                {intentLabel}
+              </span>
+            )}
 
             {/* 3-dot Menu */}
             <div className="relative">

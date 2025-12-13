@@ -343,7 +343,7 @@ async function syncAccount(account, options = {}) {
                                             authorName: (replySn.authorDisplayName || '').replace(/^@/, ''),
                                             authorId: replyAuthorChannelId,
                                             content: replySn.textDisplay,
-                                            intent: isOwnReply ? null : 'Nested Reply',  // Tag child comments
+                                            intent: isOwnReply ? null : 'Pending Thread',  // Tag child comments needing review
                                             aiDraft: null,
                                             // Mark channel owner's replies as 'posted', others as 'pending'
                                             status: isOwnReply ? 'posted' : 'pending',
@@ -475,7 +475,7 @@ async function syncAccount(account, options = {}) {
                                         mediaUrl: mediaImage,
                                         authorName: reply.username,
                                         content: reply.text,
-                                        intent: isOwnReply ? null : 'Nested Reply',  // Tag child comments
+                                        intent: isOwnReply ? null : 'Pending Thread',  // Tag child comments needing review
                                         aiDraft: null,
                                         // Mark account owner's replies as 'posted', others as 'pending'
                                         status: isOwnReply ? 'posted' : 'pending',

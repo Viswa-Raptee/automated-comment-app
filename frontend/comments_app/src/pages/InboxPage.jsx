@@ -154,10 +154,12 @@ const InboxPage = () => {
 
   // Comprehensive filters
   const [filters, setFilters] = useState({
-    status: 'all',       // 'all', 'pending', 'posted', 'rejected'
-    commenter: '',       // Search by author name
-    dateRange: 'all',    // 'all', '24h', '7d', '30d'
-    hasReplies: false    // Filter for threads with nested replies
+    status: 'all',         // 'all', 'pending', 'posted', 'rejected'
+    commenter: '',         // Search by author name
+    dateRange: 'all',      // 'all', '24h', '7d', '30d'
+    hasReplies: false,     // Filter for threads with nested replies
+    pendingThreads: false, // Filter for pending thread comments
+    assignedToMe: false    // Filter for comments assigned to current user
   });
 
   const currentPost = posts[currentPostIndex] || null;
@@ -280,10 +282,36 @@ const InboxPage = () => {
         msg.replies.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       });
 
-      // Apply hasReplies filter - only show threads with nested replies
+      // Apply filters
       let filteredParents = parents;
+
+      // Filter: hasReplies - only show threads with nested replies
       if (filters.hasReplies) {
-        filteredParents = parents.filter(p => p.replies && p.replies.length > 0);
+        filteredParents = filteredParents.filter(p => p.replies && p.replies.length > 0);
+      }
+
+      // Filter: pendingThreads - show threads that have pending child comments
+      if (filters.pendingThreads) {
+        filteredParents = filteredParents.filter(p =>
+          p.replies && p.replies.some(r =>
+            r.status === 'pending' && r.intent === 'Pending Thread'
+          )
+        );
+      }
+
+      // Filter: assignedToMe - show comments assigned to current user
+      if (filters.assignedToMe) {
+        // Get username from stored user object
+        const userJson = localStorage.getItem('user');
+        const currentUser = userJson ? JSON.parse(userJson)?.username : null;
+        if (!currentUser) {
+          filteredParents = [];  // No user logged in - show nothing
+        } else {
+          filteredParents = filteredParents.filter(p =>
+            p.assignedTo === currentUser ||
+            (p.replies && p.replies.some(r => r.assignedTo === currentUser))
+          );
+        }
       }
 
       setMessages(filteredParents);
@@ -504,9 +532,9 @@ const InboxPage = () => {
                     ({messages.length})
                   </span>
                 </h3>
-                {(filters.status !== 'all' || filters.commenter || filters.dateRange !== 'all' || filters.hasReplies) && (
+                {(filters.status !== 'all' || filters.commenter || filters.dateRange !== 'all' || filters.hasReplies || filters.pendingThreads || filters.assignedToMe) && (
                   <button
-                    onClick={() => setFilters({ status: 'all', commenter: '', dateRange: 'all', hasReplies: false })}
+                    onClick={() => setFilters({ status: 'all', commenter: '', dateRange: 'all', hasReplies: false, pendingThreads: false, assignedToMe: false })}
                     className="text-xs text-gray-500 hover:text-red-500 flex items-center gap-1"
                   >
                     <X size={12} /> Clear Filters
@@ -572,19 +600,40 @@ const InboxPage = () => {
                     </div>
                   </div>
                 </div>
-
-                {/* Has Replies Toggle */}
-                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-200">
+                {/* Filter Toggles */}
+                <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-gray-200">
+                  {/* Has Replies Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={filters.hasReplies}
                       onChange={(e) => setFilters(f => ({ ...f, hasReplies: e.target.checked }))}
-                      className="w-4 h-4 text-violet-600 rounded border-gray-300 focus:ring-violet-500"
+                      className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
                     />
-                    <span className="text-sm text-gray-700">Show only threads with replies</span>
+                    <span className="text-sm text-gray-700">Has Replies</span>
                   </label>
-                  <span className="text-xs text-gray-400">(Conversations with activity)</span>
+
+                  {/* Pending Threads Toggle */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.pendingThreads}
+                      onChange={(e) => setFilters(f => ({ ...f, pendingThreads: e.target.checked }))}
+                      className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
+                    />
+                    <span className="text-sm text-gray-700">Pending Threads</span>
+                  </label>
+
+                  {/* Assigned to Me Toggle */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.assignedToMe}
+                      onChange={(e) => setFilters(f => ({ ...f, assignedToMe: e.target.checked }))}
+                      className="w-4 h-4 text-green-600 rounded border-gray-300 focus:ring-green-500"
+                    />
+                    <span className="text-sm text-gray-700">Assigned to Me</span>
+                  </label>
                 </div>
               </div>
             </div>
