@@ -171,7 +171,7 @@ const ActionsMenu = ({ msg, onUpdate, onClose }) => {
 };
 
 // ============ MAIN MESSAGE CARD ============
-const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, replies = [], depth = 0 }) => {
+const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, replies = [], depth = 0, templates = [] }) => {
   // Check if this is our own reply (channel owner reply) - need to check this first for draft init
   const isOwnReplyCheck = msg.approvedBy === 'Channel Owner' || msg.approvedBy === 'Account Owner';
 
@@ -184,12 +184,53 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, rep
   const [generatingAI, setGeneratingAI] = useState(false);
   const [showReplies, setShowReplies] = useState(true);
 
+  // Slash-command template state
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateFilter, setTemplateFilter] = useState('');
+  const textareaRef = useRef(null);
+
   // Update local state when msg changes
   useEffect(() => {
     setLocalMsg(msg);
     const isOwnReply = msg.approvedBy === 'Channel Owner' || msg.approvedBy === 'Account Owner';
     setDraft(isOwnReply ? msg.content : (msg.aiDraft || ""));
   }, [msg]);
+
+  // Handle draft change with slash-command detection
+  const handleDraftChange = (e) => {
+    const value = e.target.value;
+    setDraft(value);
+
+    // Check for slash command at start or after space
+    const lastSlashIndex = value.lastIndexOf('/');
+    if (lastSlashIndex !== -1) {
+      const textAfterSlash = value.slice(lastSlashIndex + 1);
+      // Only show if slash is at start or after space, and no space after
+      const charBeforeSlash = lastSlashIndex > 0 ? value[lastSlashIndex - 1] : ' ';
+      if ((charBeforeSlash === ' ' || charBeforeSlash === '\n' || lastSlashIndex === 0) && !textAfterSlash.includes(' ')) {
+        setTemplateFilter(textAfterSlash.toLowerCase());
+        setShowTemplates(true);
+        return;
+      }
+    }
+    setShowTemplates(false);
+  };
+
+  // Insert template content
+  const insertTemplate = (template) => {
+    // Replace from last / to current position with template content
+    const lastSlashIndex = draft.lastIndexOf('/');
+    const newDraft = draft.slice(0, lastSlashIndex) + template.content;
+    setDraft(newDraft);
+    setShowTemplates(false);
+    if (textareaRef.current) textareaRef.current.focus();
+  };
+
+  // Filter templates based on input
+  const filteredTemplates = templates.filter(t =>
+    t.key.toLowerCase().includes(templateFilter) ||
+    t.title.toLowerCase().includes(templateFilter)
+  );
 
   const normalizedIntent = (localMsg.intent || "").trim().toLowerCase();
   const intentClasses =
@@ -438,15 +479,35 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, rep
                   {localMsg.aiDraft}
                 </div>
               ) : (
-                <textarea
-                  className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Draft reply..."
-                  disabled={sending}
-                  style={{ minHeight: '80px', height: 'auto' }}
-                  rows={Math.max(3, Math.ceil(draft.length / 60))}
-                />
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    className="w-full p-4 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none transition-all"
+                    value={draft}
+                    onChange={handleDraftChange}
+                    placeholder="Draft reply... (type / for templates)"
+                    disabled={sending}
+                    style={{ minHeight: '80px', height: 'auto' }}
+                    rows={Math.max(3, Math.ceil(draft.length / 60))}
+                  />
+
+                  {/* Template Dropdown */}
+                  {showTemplates && filteredTemplates.length > 0 && (
+                    <div className="absolute bottom-full mb-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                      {filteredTemplates.map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => insertTemplate(t)}
+                          className="w-full px-3 py-2 text-left hover:bg-indigo-50 flex items-center gap-2 text-sm border-b border-gray-100 last:border-0"
+                        >
+                          <span className="text-indigo-600 font-mono">/{t.key}</span>
+                          <span className="text-gray-700 font-medium">{t.title}</span>
+                          <span className="text-gray-400 text-xs truncate flex-1">{t.content.slice(0, 40)}...</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )
             )}
           </div>

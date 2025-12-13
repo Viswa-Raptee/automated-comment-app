@@ -15,6 +15,7 @@ import UserManagementPage from './pages/UserManagementPage';
 import AuditPage from './pages/AuditPage';
 import ManageAccountsPage from './pages/ManageAccountsPage';
 import ManageDatabasePage from './pages/ManageDatabasePage';
+import CommentViewPage from './pages/CommentViewPage';
 import LoginPage from './pages/LoginPage';
 
 const App = () => {
@@ -52,6 +53,9 @@ const App = () => {
 
                             {/* Account Inbox - View comments for specific post */}
                             <Route path="/account/:accountId/inbox" element={<InboxPage />} />
+
+                            {/* Unified Comment View - All comments across accounts */}
+                            <Route path="/comments" element={<CommentViewPage />} />
 
                             {/* User Menu */}
                             <Route path="/my-comments" element={<MyApprovalsPage />} />

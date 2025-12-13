@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import MessageCard from '../components/MessageCard';
 import NotificationDropdown from '../components/NotificationDropdown';
+import TemplatePanel from '../components/TemplatePanel';
 
 // ============ MEDIA EMBED COMPONENT ============
 const MediaEmbed = ({ post, platform }) => {
@@ -151,6 +152,7 @@ const InboxPage = () => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
+  const [templates, setTemplates] = useState([]);
 
   // Comprehensive filters
   const [filters, setFilters] = useState({
@@ -665,12 +667,16 @@ const InboxPage = () => {
                     onRefresh={fetchMessages}
                     isPosted={msg.status === 'posted'}
                     replies={msg.replies || []}
+                    templates={templates}
                   />
                 ))}
               </div>
             )}
           </div>
         </div>
+
+        {/* Template Panel - Right Side */}
+        <TemplatePanel onTemplatesChange={setTemplates} />
       </div>
     </div>
   );

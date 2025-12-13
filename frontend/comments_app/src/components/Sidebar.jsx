@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Instagram, Youtube, LogOut, FileText, PlusCircle, User,
   Shield, Users, Settings, MessageSquare, LayoutDashboard,
-  ChevronRight, Layers, Database
+  ChevronRight, Layers, Database, Eye, List
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAccounts } from '../context/AccountContext';
@@ -15,9 +15,19 @@ const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // View toggle state - persisted in localStorage
+  const [viewMode, setViewMode] = useState(() =>
+    localStorage.getItem('viewMode') || 'account'
+  );
+
   useEffect(() => {
     fetchAccounts();
   }, []);
+
+  // Save view mode to localStorage
+  useEffect(() => {
+    localStorage.setItem('viewMode', viewMode);
+  }, [viewMode]);
 
   const isActive = (path) => location.pathname === path;
   const isAccountActive = (accountId) => location.pathname.startsWith(`/account/${accountId}`);
@@ -27,6 +37,14 @@ const Sidebar = () => {
     ${active
       ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
       : 'text-gray-300 hover:bg-gray-800/60 hover:text-white'
+    }
+  `;
+
+  const viewToggleClass = (active) => `
+    flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2
+    ${active
+      ? 'bg-indigo-600 text-white'
+      : 'text-gray-400 hover:bg-gray-800/60 hover:text-white'
     }
   `;
 
@@ -53,50 +71,89 @@ const Sidebar = () => {
           </Link>
         </div>
 
-        {/* Accounts Section */}
+        {/* View Toggle Section */}
         <div>
           <p className="px-3 mb-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-            <Layers size={12} />
-            Accounts
+            <Eye size={12} />
+            View Mode
           </p>
-          <div className="space-y-1">
-            {accounts.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-gray-500 italic">No accounts connected</p>
-            ) : (
-              accounts.map(account => (
-                <Link
-                  key={account.id}
-                  to={`/account/${account.id}`}
-                  className={`
-                    flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 group
-                    ${isAccountActive(account.id)
-                      ? 'bg-gradient-to-r from-indigo-600/80 to-purple-600/80 text-white shadow-lg'
-                      : 'text-gray-400 hover:bg-gray-800/60 hover:text-white'
-                    }
-                  `}
-                >
-                  <div className={`
-                    w-7 h-7 rounded-lg flex items-center justify-center transition-transform group-hover:scale-110
-                    ${account.platform === 'instagram'
-                      ? 'bg-gradient-to-br from-pink-500 to-purple-500'
-                      : 'bg-gradient-to-br from-red-500 to-red-600'
-                    }
-                  `}>
-                    {account.platform === 'instagram'
-                      ? <Instagram size={14} className="text-white" />
-                      : <Youtube size={14} className="text-white" />
-                    }
-                  </div>
-                  <span className="flex-1 truncate">{account.name}</span>
-                  <ChevronRight size={14} className={`
-                    transition-transform opacity-0 group-hover:opacity-100
-                    ${isAccountActive(account.id) ? 'opacity-100' : ''}
-                  `} />
-                </Link>
-              ))
-            )}
+          <div className="flex gap-1 bg-gray-800/40 p-1 rounded-xl">
+            <button
+              onClick={() => setViewMode('account')}
+              className={viewToggleClass(viewMode === 'account')}
+            >
+              <Layers size={14} />
+              Account
+            </button>
+            <button
+              onClick={() => {
+                setViewMode('comment');
+                navigate('/comments');
+              }}
+              className={viewToggleClass(viewMode === 'comment')}
+            >
+              <List size={14} />
+              Comments
+            </button>
           </div>
         </div>
+
+        {/* Accounts Section - Only show in Account View mode */}
+        {viewMode === 'account' && (
+          <div>
+            <p className="px-3 mb-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+              <Layers size={12} />
+              Accounts
+            </p>
+            <div className="space-y-1">
+              {accounts.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-gray-500 italic">No accounts connected</p>
+              ) : (
+                accounts.map(account => (
+                  <Link
+                    key={account.id}
+                    to={`/account/${account.id}`}
+                    className={`
+                      flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 group
+                      ${isAccountActive(account.id)
+                        ? 'bg-gradient-to-r from-indigo-600/80 to-purple-600/80 text-white shadow-lg'
+                        : 'text-gray-400 hover:bg-gray-800/60 hover:text-white'
+                      }
+                    `}
+                  >
+                    <div className={`
+                      w-7 h-7 rounded-lg flex items-center justify-center transition-transform group-hover:scale-110
+                      ${account.platform === 'instagram'
+                        ? 'bg-gradient-to-br from-pink-500 to-purple-500'
+                        : 'bg-gradient-to-br from-red-500 to-red-600'
+                      }
+                    `}>
+                      {account.platform === 'instagram'
+                        ? <Instagram size={14} className="text-white" />
+                        : <Youtube size={14} className="text-white" />
+                      }
+                    </div>
+                    <span className="flex-1 truncate">{account.name}</span>
+                    <ChevronRight size={14} className={`
+                      transition-transform opacity-0 group-hover:opacity-100
+                      ${isAccountActive(account.id) ? 'opacity-100' : ''}
+                    `} />
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Comment View indicator */}
+        {viewMode === 'comment' && (
+          <div>
+            <Link to="/comments" className={menuItemClass(isActive('/comments'))}>
+              <MessageSquare size={18} />
+              <span>All Comments</span>
+            </Link>
+          </div>
+        )}
 
         {/* User Menu */}
         <div>

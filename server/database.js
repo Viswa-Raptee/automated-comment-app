@@ -104,7 +104,11 @@ const Message = sequelize.define('Message', {
   editedAt: { type: DataTypes.DATE },
 
   // === Reply tracking for edit functionality ===
-  replyExternalId: { type: DataTypes.STRING }  // The ID of our reply on the platform
+  replyExternalId: { type: DataTypes.STRING },  // The ID of our reply on the platform
+
+  // === Language detection for assistance ===
+  detectedLanguage: { type: DataTypes.STRING },  // 'en', 'ta', 'mixed', etc.
+  assistanceNeeded: { type: DataTypes.BOOLEAN, defaultValue: false }  // Non-English comments
 });
 
 // --- 4. NOTIFICATION ---
@@ -132,6 +136,15 @@ const ChromaConfig = sequelize.define('ChromaConfig', {
   database: { type: DataTypes.STRING, allowNull: false },     // Chroma database
   isActive: { type: DataTypes.BOOLEAN, defaultValue: false }, // Only one can be active
   activeCollection: { type: DataTypes.STRING }                // Currently active collection
+});
+
+// --- 6. TEMPLATE (for slash-commands and RAG) ---
+const Template = sequelize.define('Template', {
+  title: { type: DataTypes.STRING, allowNull: false },        // "Greeting"
+  key: { type: DataTypes.STRING, unique: true, allowNull: false }, // "greet" (without /)
+  content: { type: DataTypes.TEXT, allowNull: false },        // Full template text
+  createdBy: { type: DataTypes.STRING },
+  updatedBy: { type: DataTypes.STRING }
 });
 
 // Relationships
@@ -178,6 +191,9 @@ async function syncDatabase() {
       { table: 'Posts', column: 'embedUrl', type: 'TEXT' },
       { table: 'Posts', column: 'publishedAt', type: 'DATETIME' },
       { table: 'Posts', column: 'lastSyncedAt', type: 'DATETIME' },
+      // Language detection
+      { table: 'Messages', column: 'detectedLanguage', type: 'TEXT' },
+      { table: 'Messages', column: 'assistanceNeeded', type: 'INTEGER DEFAULT 0' },
     ];
 
     for (const { table, column, type } of columnsToAdd) {
@@ -200,4 +216,4 @@ async function syncDatabase() {
 
 syncDatabase();
 
-module.exports = { sequelize, User, Account, Post, Message, Notification, ChromaConfig };
+module.exports = { sequelize, User, Account, Post, Message, Notification, ChromaConfig, Template };

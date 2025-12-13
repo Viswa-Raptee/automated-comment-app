@@ -8,7 +8,7 @@ const fs = require('fs');
 require('dotenv').config();
 
 // --- IMPORTS ---
-const { sequelize, User, Account, Post, Message, Notification } = require('./database');
+const { sequelize, User, Account, Post, Message, Notification, Template } = require('./database');
 const { authenticate, isAdmin } = require('./middleware/auth');
 const { syncAccount, postInstagramReply, postYouTubeReply, updateYouTubeComment, updateInstagramReply, loadClientSecrets, notifyAllUsersForIntent } = require('./services/platforms');
 
@@ -433,6 +433,37 @@ app.get('/api/messages/threaded', authenticate, async (req, res) => {
         });
 
         res.json(parentMessages);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get ALL messages across all accounts (for unified comment view)
+app.get('/api/messages/all', authenticate, async (req, res) => {
+    try {
+        const { platform, status, dateRange } = req.query;
+        const where = {};
+
+        if (platform) where.platform = platform;
+        if (status && status !== 'all') where.status = status;
+
+        // Date range filter
+        if (dateRange && dateRange !== 'all') {
+            const now = new Date();
+            let since;
+            if (dateRange === '24h') since = new Date(now - 24 * 60 * 60 * 1000);
+            else if (dateRange === '7d') since = new Date(now - 7 * 24 * 60 * 60 * 1000);
+            else if (dateRange === '30d') since = new Date(now - 30 * 24 * 60 * 60 * 1000);
+            if (since) where.createdAt = { [require('sequelize').Op.gte]: since };
+        }
+
+        const messages = await Message.findAll({
+            where,
+            order: [['createdAt', 'DESC']],
+            include: { model: Account, attributes: ['name', 'platform', 'identifier'] }
+        });
+
+        res.json(messages);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -1180,6 +1211,83 @@ app.get('/api/admin/chroma/active', authenticate, async (req, res) => {
                 activeCollection: config.activeCollection
             }
         });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ==========================================
+// TEMPLATE MANAGEMENT (for slash-commands)
+// ==========================================
+
+// Get all templates
+app.get('/api/templates', authenticate, async (req, res) => {
+    try {
+        const templates = await Template.findAll({ order: [['title', 'ASC']] });
+        res.json(templates);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Create template
+app.post('/api/templates', authenticate, async (req, res) => {
+    const { title, key, content } = req.body;
+
+    if (!title || !key || !content) {
+        return res.status(400).json({ error: 'Title, key, and content are required' });
+    }
+
+    // Clean key - remove leading slash if present, lowercase
+    const cleanKey = key.replace(/^\//, '').toLowerCase().trim();
+
+    try {
+        const template = await Template.create({
+            title,
+            key: cleanKey,
+            content,
+            createdBy: req.user.username
+        });
+        res.json(template);
+    } catch (e) {
+        if (e.name === 'SequelizeUniqueConstraintError') {
+            return res.status(400).json({ error: 'Template key already exists' });
+        }
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update template
+app.put('/api/templates/:id', authenticate, async (req, res) => {
+    const { title, key, content } = req.body;
+
+    try {
+        const template = await Template.findByPk(req.params.id);
+        if (!template) return res.status(404).json({ error: 'Template not found' });
+
+        if (title) template.title = title;
+        if (key) template.key = key.replace(/^\//, '').toLowerCase().trim();
+        if (content) template.content = content;
+        template.updatedBy = req.user.username;
+
+        await template.save();
+        res.json(template);
+    } catch (e) {
+        if (e.name === 'SequelizeUniqueConstraintError') {
+            return res.status(400).json({ error: 'Template key already exists' });
+        }
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete template
+app.delete('/api/templates/:id', authenticate, async (req, res) => {
+    try {
+        const template = await Template.findByPk(req.params.id);
+        if (!template) return res.status(404).json({ error: 'Template not found' });
+
+        await template.destroy();
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

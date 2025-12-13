@@ -111,9 +111,21 @@ async function getCollection() {
 
 // ---------- MAIN ANALYZE & DRAFT ----------
 async function analyzeAndDraft(text, platform) {
-  if (!text) return { intent: 'No Content', reply: '', assistance_needed: false };
+  if (!text) return { intent: 'No Content', reply: '', assistance_needed: false, detected_language: 'unknown' };
 
   let contextStr = 'No specific knowledge found in database.';
+  let templateStr = 'No templates available.';
+
+  // Fetch templates from database
+  try {
+    const { Template } = require('../database');
+    const templates = await Template.findAll();
+    if (templates.length > 0) {
+      templateStr = templates.map(t => `- /${t.key}: ${t.title} - "${t.content}"`).join('\n');
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not fetch templates:', e.message);
+  }
 
   try {
     const collection = await getCollection();
@@ -146,24 +158,30 @@ async function analyzeAndDraft(text, platform) {
   const prompt = `
     You are a professional customer support agent for ${platform}.
     
-    KNOWLEDGE BASE CONTEXT:
+    KNOWLEDGE BASE CONTEXT (use only if relevant):
     ${contextStr}
+    
+    REPLY TEMPLATES (prefer using these when applicable, modify as needed):
+    ${templateStr}
     
     USER MESSAGE:
     "${text}"
     
     INSTRUCTIONS:
     1. Identify the user's INTENT (Question, Complaint, Praise, Spam, Technical Issue).
-    2. Draft a polite, helpful REPLY based *strictly* on the Context.
-    3. If there is a complaint, apologize and ask the user to DM or raise a ticket.
-    4. If there is a suggestion or negative opinion, say thank you for the feedback and mention you will look into it.
-    5. If there is not enough context, give a general reply and set 'assistance_needed' to true.
+    2. DETECT the language of the user message (e.g., 'en', 'ta', 'hi', 'mixed' for mixed languages like Tanglish).
+    3. Draft a polite, helpful REPLY. If a template fits, use it and modify based on context.
+    4. If the comment is NOT in English (including mixed language like Tanglish), set 'assistance_needed' to true.
+    5. If there is a complaint, apologize and ask the user to DM or raise a ticket.
+    6. If there is a suggestion or negative opinion, say thank you for the feedback.
+    7. If there is not enough context and no template fits, give a general reply and set 'assistance_needed' to true.
     
     OUTPUT FORMAT (JSON ONLY):
     {
         "intent": "Category",
         "reply": "Your draft reply here...",
-        "assistance_needed": boolean
+        "assistance_needed": boolean,
+        "detected_language": "language code (en, ta, hi, mixed, etc.)"
     }
   `;
 
@@ -185,6 +203,7 @@ async function analyzeAndDraft(text, platform) {
       intent: 'Error',
       reply: "I'm having trouble processing this right now.",
       assistance_needed: true,
+      detected_language: 'unknown'
     };
   }
 }
