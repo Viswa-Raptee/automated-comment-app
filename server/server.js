@@ -275,7 +275,9 @@ app.post('/api/accounts/:id/batch-generate', authenticate, async (req, res) => {
             const result = await analyzeAndDraft(comment.content, comment.platform || 'youtube');
             await comment.update({
                 intent: result.intent,
-                aiDraft: result.reply
+                aiDraft: result.reply,
+                assistanceNeeded: result.assistance_needed || false,
+                detectedLanguage: result.detected_language || 'en'
             });
 
             // Send notification for complaints and questions
@@ -443,8 +445,10 @@ app.get('/api/messages/all', authenticate, async (req, res) => {
     try {
         const { platform, status, dateRange } = req.query;
         const where = {};
+        const accountWhere = {};
 
-        if (platform) where.platform = platform;
+        // Platform filter is on Account, not Message
+        if (platform && platform !== 'all') accountWhere.platform = platform;
         if (status && status !== 'all') where.status = status;
 
         // Date range filter
@@ -460,7 +464,12 @@ app.get('/api/messages/all', authenticate, async (req, res) => {
         const messages = await Message.findAll({
             where,
             order: [['createdAt', 'DESC']],
-            include: { model: Account, attributes: ['name', 'platform', 'identifier'] }
+            include: {
+                model: Account,
+                attributes: ['name', 'platform', 'identifier'],
+                where: Object.keys(accountWhere).length > 0 ? accountWhere : undefined,
+                required: Object.keys(accountWhere).length > 0  // INNER JOIN when filtering
+            }
         });
 
         res.json(messages);
@@ -484,6 +493,8 @@ app.post('/api/messages/:id/generate-reply', authenticate, async (req, res) => {
 
         msg.intent = ai.intent;
         msg.aiDraft = ai.reply;
+        msg.assistanceNeeded = ai.assistance_needed || false;
+        msg.detectedLanguage = ai.detected_language || 'en';
         await msg.save();
 
         console.log(`🤖 Generated AI reply for message ${msg.id}`);

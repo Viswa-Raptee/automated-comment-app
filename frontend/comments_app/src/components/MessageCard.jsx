@@ -538,6 +538,7 @@ const MessageCard = ({ msg, onApprove, onUpdateMessage, onRefresh, isPosted, rep
                   isPosted={reply.status === 'posted'}
                   replies={reply.replies || []}
                   depth={depth + 1}
+                  templates={templates}
                 />
               ))}
             </div>

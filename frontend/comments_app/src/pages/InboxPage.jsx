@@ -157,6 +157,7 @@ const InboxPage = () => {
   // Comprehensive filters
   const [filters, setFilters] = useState({
     status: 'all',         // 'all', 'pending', 'posted', 'rejected'
+    intent: 'all',         // 'all', 'Question', 'Praise', 'Complaint', 'Assistance Needed'
     commenter: '',         // Search by author name
     dateRange: 'all',      // 'all', '24h', '7d', '30d'
     hasReplies: false,     // Filter for threads with nested replies
@@ -314,6 +315,19 @@ const InboxPage = () => {
             (p.replies && p.replies.some(r => r.assignedTo === currentUser))
           );
         }
+      }
+
+      // Filter: intent - filter by comment intent
+      if (filters.intent && filters.intent !== 'all') {
+        filteredParents = filteredParents.filter(p => {
+          const normalizedIntent = (p.intent || '').toLowerCase();
+          const filterIntent = filters.intent.toLowerCase();
+          // Handle "Assistance Needed" matching assistanceNeeded flag
+          if (filterIntent === 'assistance needed') {
+            return p.assistanceNeeded === true;
+          }
+          return normalizedIntent.includes(filterIntent);
+        });
       }
 
       setMessages(filteredParents);
@@ -550,7 +564,7 @@ const InboxPage = () => {
                   <Filter size={14} className="text-indigo-600" />
                   <span className="text-xs font-medium text-gray-600">Filters</span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {/* Status Filter */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
@@ -564,6 +578,25 @@ const InboxPage = () => {
                         <option value="pending">Pending</option>
                         <option value="posted">Posted</option>
                         <option value="rejected">Rejected</option>
+                      </select>
+                      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Intent Filter */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Intent</label>
+                    <div className="relative">
+                      <select
+                        value={filters.intent}
+                        onChange={(e) => setFilters(f => ({ ...f, intent: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="all">All Intent</option>
+                        <option value="Question">Question</option>
+                        <option value="Praise">Praise</option>
+                        <option value="Complaint">Complaint</option>
+                        <option value="Assistance Needed">Assistance Needed</option>
                       </select>
                       <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>

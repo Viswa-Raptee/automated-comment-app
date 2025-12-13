@@ -121,7 +121,7 @@ async function analyzeAndDraft(text, platform) {
     const { Template } = require('../database');
     const templates = await Template.findAll();
     if (templates.length > 0) {
-      templateStr = templates.map(t => `- /${t.key}: ${t.title} - "${t.content}"`).join('\n');
+      templateStr = templates.map(t => `- ${t.content}`).join('\n');
     }
   } catch (e) {
     console.warn('⚠️ Could not fetch templates:', e.message);
@@ -166,20 +166,25 @@ async function analyzeAndDraft(text, platform) {
     
     USER MESSAGE:
     "${text}"
+
+    CRITICAL RULE - NON-ENGLISH DETECTION:
+    If the user message is NOT in pure English (including Tamil, Hindi, Tanglish, Hinglish, or any mixed language):
+    - Set "intent" to "Assistance Needed"
+    - Set "reply" to "" (empty string - do NOT generate any reply)
+    - Set "assistance_needed" to true
+    - Return immediately without further processing
     
-    INSTRUCTIONS:
-    1. Identify the user's INTENT (Question, Complaint, Praise, Spam, Technical Issue).
-    2. DETECT the language of the user message (e.g., 'en', 'ta', 'hi', 'mixed' for mixed languages like Tanglish).
-    3. Draft a polite, helpful REPLY. If a template fits, use it and modify based on context.
-    4. If the comment is NOT in English (including mixed language like Tanglish), set 'assistance_needed' to true.
-    5. If there is a complaint, apologize and ask the user to DM or raise a ticket.
-    6. If there is a suggestion or negative opinion, say thank you for the feedback.
-    7. If there is not enough context and no template fits, give a general reply and set 'assistance_needed' to true.
+    INSTRUCTIONS (only for ENGLISH messages):
+    1. Identify the user's INTENT (Question, Complaint, Praise).
+    2. Draft a polite, helpful REPLY. If a template fits, use it and modify based on context.
+    3. If there is a complaint, apologize and ask the user to DM or raise a ticket.
+    4. If there is a suggestion or negative opinion, say thank you for the feedback.
+    5. If there is not enough context and no template fits, set 'assistance_needed' to true but still try to give a generic reply.
     
     OUTPUT FORMAT (JSON ONLY):
     {
-        "intent": "Category",
-        "reply": "Your draft reply here...",
+        "intent": "Category (Question, Complaint, Praise, or Assistance Needed)",
+        "reply": "Your draft reply here (empty string for non-English)",
         "assistance_needed": boolean,
         "detected_language": "language code (en, ta, hi, mixed, etc.)"
     }
@@ -188,7 +193,7 @@ async function analyzeAndDraft(text, platform) {
   try {
     const result = await retryWithBackoff(async () => {
       const chatResponse = await mistral.chat.complete({
-        model: 'mistral-small-latest',
+        model: 'mistral-medium-latest',
         messages: [{ role: 'user', content: prompt }],
         responseFormat: { type: 'json_object' },
       });

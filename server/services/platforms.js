@@ -276,10 +276,15 @@ async function syncAccount(account, options = {}) {
                                 // Only generate AI for parent comments without replies
                                 const isAlreadyReplied = replyCount > 0;
 
+                                let assistanceNeeded = false;
+                                let detectedLanguage = 'en';
+
                                 if (!skipAiGeneration && !isAlreadyReplied) {
                                     const ai = await analyzeAndDraft(sn.textDisplay, 'youtube');
                                     intent = ai.intent;
                                     aiDraft = ai.reply;
+                                    assistanceNeeded = ai.assistance_needed || false;
+                                    detectedLanguage = ai.detected_language || 'en';
                                 }
 
                                 // Clean up author name (YouTube sometimes includes @ prefix)
@@ -304,6 +309,8 @@ async function syncAccount(account, options = {}) {
                                     content: sn.textDisplay,
                                     intent,
                                     aiDraft,
+                                    assistanceNeeded,
+                                    detectedLanguage,
                                     status: isAlreadyReplied ? 'posted' : 'pending',
                                     createdAt: commentDate,
                                     approvedBy: isAlreadyReplied ? 'Synced' : null,
@@ -419,6 +426,8 @@ async function syncAccount(account, options = {}) {
                         if (!parentMsg) {
                             let intent = null;
                             let aiDraft = null;
+                            let assistanceNeeded = false;
+                            let detectedLanguage = 'en';
 
                             // Only generate AI for top-level comments without replies
                             const hasReplies = c.replies && c.replies.data && c.replies.data.length > 0;
@@ -427,6 +436,8 @@ async function syncAccount(account, options = {}) {
                                 const ai = await analyzeAndDraft(c.text, 'instagram');
                                 intent = ai.intent;
                                 aiDraft = ai.reply;
+                                assistanceNeeded = ai.assistance_needed || false;
+                                detectedLanguage = ai.detected_language || 'en';
                             }
 
                             parentMsg = await Message.create({
@@ -442,6 +453,8 @@ async function syncAccount(account, options = {}) {
                                 content: c.text,
                                 intent,
                                 aiDraft,
+                                assistanceNeeded,
+                                detectedLanguage,
                                 status: hasReplies ? 'posted' : 'pending',
                                 createdAt: c.timestamp ? new Date(c.timestamp) : new Date(),
                                 approvedBy: hasReplies ? 'Synced' : null,

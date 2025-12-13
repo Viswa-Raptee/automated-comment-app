@@ -295,8 +295,8 @@ const DashboardPage = () => {
 
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto p-6">
-                {/* Stats Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-5 mb-6">
+                {/* Stats Cards - Row 1 (4 cards) */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-4">
                     <StatsCard
                         title="Total Comments"
                         count={stats.total}
@@ -321,6 +321,10 @@ const DashboardPage = () => {
                         icon={XCircle}
                         color={COLORS.danger}
                     />
+                </div>
+
+                {/* Stats Cards - Row 2 (3 cards) */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-5 mb-6">
                     <StatsCard
                         title="Complaints"
                         count={stats.complaints}
@@ -332,6 +336,12 @@ const DashboardPage = () => {
                         count={stats.questions}
                         icon={HelpCircle}
                         color={COLORS.cyan}
+                    />
+                    <StatsCard
+                        title="Assistance Needed"
+                        count={stats.assistanceNeeded || 0}
+                        icon={AlertTriangle}
+                        color={COLORS.purple}
                     />
                 </div>
 

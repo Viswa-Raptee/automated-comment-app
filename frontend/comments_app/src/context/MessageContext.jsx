@@ -191,7 +191,8 @@ export const MessageProvider = ({ children }) => {
             approved: filtered.filter(m => m.status === 'approved' || m.status === 'posted').length,
             rejected: filtered.filter(m => m.status === 'rejected').length,
             complaints: filtered.filter(m => (m.intent || '').toLowerCase() === 'complaint').length,
-            questions: filtered.filter(m => (m.intent || '').toLowerCase() === 'question').length
+            questions: filtered.filter(m => (m.intent || '').toLowerCase() === 'question').length,
+            assistanceNeeded: filtered.filter(m => m.assistanceNeeded === true).length
         };
     }, [filterMessages]);
 

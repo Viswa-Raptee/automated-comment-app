@@ -22,12 +22,12 @@ const CommentViewPage = () => {
     // Comprehensive filters
     const [filters, setFilters] = useState({
         status: 'all',
+        intent: 'all',         // 'all', 'Question', 'Praise', 'Complaint', 'Assistance Needed'
         commenter: '',
         dateRange: 'all',
         hasReplies: false,
         pendingThreads: false,
-        assignedToMe: false,
-        assistanceNeeded: false
+        assignedToMe: false
     });
 
     // Template panel
@@ -106,12 +106,17 @@ const CommentViewPage = () => {
                 }
             }
 
-            // Assistance needed filter
-            if (filters.assistanceNeeded) {
-                filteredParents = filteredParents.filter(p =>
-                    p.assistanceNeeded ||
-                    (p.replies && p.replies.some(r => r.assistanceNeeded))
-                );
+            // Filter: intent - filter by comment intent
+            if (filters.intent && filters.intent !== 'all') {
+                filteredParents = filteredParents.filter(p => {
+                    const normalizedIntent = (p.intent || '').toLowerCase();
+                    const filterIntent = filters.intent.toLowerCase();
+                    // Handle "Assistance Needed" matching assistanceNeeded flag
+                    if (filterIntent === 'assistance needed') {
+                        return p.assistanceNeeded === true;
+                    }
+                    return normalizedIntent.includes(filterIntent);
+                });
             }
 
             setMessages(filteredParents);
@@ -186,9 +191,9 @@ const CommentViewPage = () => {
         }
     };
 
-    const hasActiveFilters = filters.status !== 'all' || filters.commenter ||
+    const hasActiveFilters = filters.status !== 'all' || filters.intent !== 'all' || filters.commenter ||
         filters.dateRange !== 'all' || filters.hasReplies || filters.pendingThreads ||
-        filters.assignedToMe || filters.assistanceNeeded;
+        filters.assignedToMe;
 
     return (
         <div className="flex-1 h-screen overflow-hidden bg-gradient-to-br from-slate-50 to-gray-100">
@@ -210,8 +215,8 @@ const CommentViewPage = () => {
                                 <button
                                     onClick={() => setPlatform('all')}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${platform === 'all'
-                                            ? 'bg-white text-gray-900 shadow-sm'
-                                            : 'text-gray-500 hover:text-gray-700'
+                                        ? 'bg-white text-gray-900 shadow-sm'
+                                        : 'text-gray-500 hover:text-gray-700'
                                         }`}
                                 >
                                     All
@@ -219,8 +224,8 @@ const CommentViewPage = () => {
                                 <button
                                     onClick={() => setPlatform('youtube')}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${platform === 'youtube'
-                                            ? 'bg-red-500 text-white shadow-sm'
-                                            : 'text-gray-500 hover:text-red-500'
+                                        ? 'bg-red-500 text-white shadow-sm'
+                                        : 'text-gray-500 hover:text-red-500'
                                         }`}
                                 >
                                     <Youtube size={16} />
@@ -229,8 +234,8 @@ const CommentViewPage = () => {
                                 <button
                                     onClick={() => setPlatform('instagram')}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${platform === 'instagram'
-                                            ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white shadow-sm'
-                                            : 'text-gray-500 hover:text-pink-500'
+                                        ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white shadow-sm'
+                                        : 'text-gray-500 hover:text-pink-500'
                                         }`}
                                 >
                                     <Instagram size={16} />
@@ -253,7 +258,7 @@ const CommentViewPage = () => {
                                 </h3>
                                 {hasActiveFilters && (
                                     <button
-                                        onClick={() => setFilters({ status: 'all', commenter: '', dateRange: 'all', hasReplies: false, pendingThreads: false, assignedToMe: false, assistanceNeeded: false })}
+                                        onClick={() => setFilters({ status: 'all', intent: 'all', commenter: '', dateRange: 'all', hasReplies: false, pendingThreads: false, assignedToMe: false })}
                                         className="text-xs text-gray-500 hover:text-red-500 flex items-center gap-1"
                                     >
                                         <X size={12} /> Clear Filters
@@ -267,7 +272,7 @@ const CommentViewPage = () => {
                                     <Filter size={14} className="text-indigo-600" />
                                     <span className="text-xs font-medium text-gray-600">Filters</span>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                     {/* Status Filter */}
                                     <div>
                                         <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
@@ -279,6 +284,22 @@ const CommentViewPage = () => {
                                             <option value="all">All Status</option>
                                             <option value="pending">Pending</option>
                                             <option value="posted">Posted</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Intent Filter */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Intent</label>
+                                        <select
+                                            value={filters.intent}
+                                            onChange={(e) => setFilters(f => ({ ...f, intent: e.target.value }))}
+                                            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="all">All Intent</option>
+                                            <option value="Question">Question</option>
+                                            <option value="Praise">Praise</option>
+                                            <option value="Complaint">Complaint</option>
+                                            <option value="Assistance Needed">Assistance Needed</option>
                                         </select>
                                     </div>
 
@@ -341,15 +362,6 @@ const CommentViewPage = () => {
                                             className="w-4 h-4 text-green-600 rounded border-gray-300"
                                         />
                                         <span className="text-sm text-gray-700">Assigned to Me</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={filters.assistanceNeeded}
-                                            onChange={(e) => setFilters(f => ({ ...f, assistanceNeeded: e.target.checked }))}
-                                            className="w-4 h-4 text-purple-600 rounded border-gray-300"
-                                        />
-                                        <span className="text-sm text-gray-700">Needs Assistance</span>
                                     </label>
                                 </div>
                             </div>
