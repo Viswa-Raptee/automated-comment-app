@@ -45,7 +45,7 @@ const CommentViewPage = () => {
             if (filters.status !== 'all') params.append('status', filters.status);
             if (filters.dateRange !== 'all') params.append('dateRange', filters.dateRange);
 
-            const { data } = await api.get(`/messages/all?${params.toString()}`);
+            const { data } = await api.get(`/platform-messages/all?${params.toString()}`);
 
             // Build threaded structure
             const messageMap = new Map();

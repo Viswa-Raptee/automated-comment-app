@@ -441,11 +441,13 @@ app.get('/api/messages/threaded', authenticate, async (req, res) => {
 });
 
 // Get ALL messages across all accounts (for unified comment view)
-app.get('/api/messages/all', authenticate, async (req, res) => {
+app.get('/api/platform-messages/all', authenticate, async (req, res) => {
     try {
         const { platform, status, dateRange } = req.query;
         const where = {};
         const accountWhere = {};
+
+        //console.log('📥 /messages/all - platform:', platform, '| status:', status, '| dateRange:', dateRange);
 
         // Platform filter is on Account, not Message
         if (platform && platform !== 'all') accountWhere.platform = platform;
